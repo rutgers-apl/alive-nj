@@ -4,7 +4,9 @@ Translate expressions into SMT via Z3
 
 from language import *
 from typing import TypeConstraints
-import z3, operator
+import z3, operator, logging
+
+logger = logging.getLogger(__name__)
 
 def _mk_bop(op, defined = None, poisons = None):
   def bop(self, term):
@@ -21,6 +23,9 @@ def _mk_bop(op, defined = None, poisons = None):
     return op(x,y), d, nonpoison
   
   return bop
+
+def bool_to_BitVec(b):
+  return z3.If(b, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))
 
 
 class SMTTranslator(Visitor):
@@ -40,141 +45,6 @@ class SMTTranslator(Visitor):
   def Input(self, term):
     # TODO: unique name check
     return z3.BitVec(term.name, self.bits(term)), [], []
-
-
-#   def AddInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.y)
-#     
-#     nonpoison = px+py
-#     if 'nsw' in term.flags:
-#       nonpoison.append(z3.SignExt(1,x)+z3.SignExt(1,y) == z3.SignExt(1,x+y))
-#     if 'nuw' in term.flags:
-#       nonpoison.append(z3.ZeroExt(1,x)+z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y))
-# 
-#     return x+y, dx+dy, nonpoison
-# 
-#   def SubInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.y)
-#     
-#     nonpoison = px+py
-#     if 'nsw' in term.flags:
-#       nonpoison.append(z3.SignExt(1,x)-z3.SignExt(1,y) == z3.SignExt(1,x-y))
-#     if 'nuw' in term.flags:
-#       nonpoison.append(z3.ZeroExt(1,x)-z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
-# 
-#     return x-y, dx+dy, nonpoison
-# 
-#   def MulInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.y)
-#     
-#     nonpoison = px+py
-#     size = x.size()
-#     if 'nsw' in term.flags:
-#       nonpoison.append(z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size, x*y))
-#     if 'nuw' in term.flags:
-#       nonpoison.append(z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size, x*y))
-#     
-#     return x*y, dx+dy, nonpoison
-# 
-#   def SDivInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.y)
-# 
-#     nonpoison = px+py
-#     if 'exact' in term.flags:
-#       nonpoison.append((x/y)*y == x)
-# 
-#     bits = self.bits(term)
-#     defined = dx + dy + [y != 0, z3.Or(x != (1 << (bits-1)), y != -1)]
-#     
-#     return x/y, defined, nonpoison
-# 
-#   def UDivInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-#     
-#     nonpoison = px+py
-#     if 'exact' in term.flags:
-#       nonpoison.append(z3.UDiv(x,y)*y == x)
-#     
-#     defined = dx + dy + [y != 0]
-#     
-#     return z3.UDiv(x,y), defined, nonpoison
-# 
-#   def SRemInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-#     
-#     bits = self.bits(term)
-#     defined = dx + dy + [y != 0, z3.Or(x != (1 << (bits-1)), y != -1)]
-#     
-#     return z3.SRem(x,y), defined, px+py
-# 
-#   def URemInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-#     
-#     return z3.URem(x,y), dx+dy+[y != 0], px+py
-# 
-#   def ShlInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-#     
-#     nonpoison = px+py
-#     if 'nsw' in term.flags:
-#       nonpoison.append((x << y) >> y == x)
-#     if 'nuw' in term.flags:
-#       nonpoison.append(LShR(x << y, y) == x)
-#     
-#     defined = dx + dy + [ULT(y, self.bits(term))]
-#     
-#     return x << y, defined, nonpoison
-# 
-#   def AShrInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-# 
-#     nonpoison = dx+dy
-#     if 'exact' in term.flags:
-#       nonpoison.append((x >> y) << y == x)
-#     
-#     defined = dx + dy + [ULT(y, self.bits(term))]
-#     
-#     return x >> y, defined, nonpoison
-# 
-#   def LShrInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-# 
-#     nonpoison = dx+dy
-#     if 'exact' in term.flags:
-#       nonpoison.append(LShR(x, y) << y == x)
-#     
-#     defined = dx + dy + [ULT(y, self.bits(term))]
-#     
-#     return LShR(x, y), defined, nonpoison
-# 
-#   def AndInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-# 
-#     return a & b, dx+dy, px+py
-# 
-#   def OrInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-# 
-#     return a | b, dx+dy, px+py
-# 
-#   def XorInst(self, term):
-#     x,dx,px = self(term.x)
-#     y,dy,py = self(term.x)
-# 
-#     return a ^ b, dx+dy, px+py
-
 
   AddInst = _mk_bop(operator.add,
     poisons =
@@ -242,7 +112,23 @@ class SMTTranslator(Visitor):
     tgt = self.bits(term)
     return z3.Extract(tgt - 1, 0, v), d, p
 
-  #def IcmpInst(self, term):
+  def IcmpInst(self, term):
+    x,dx,px = self(term.x)
+    y,dy,py = self(term.y)
+
+    cmp = {
+      'eq': operator.eq,
+      'ne': operator.ne,
+      'ugt': z3.UGT,
+      'uge': z3.UGE,
+      'ult': z3.ULT,
+      'ule': z3.ULE,
+      'sgt': operator.gt,
+      'sge': operator.ge,
+      'slt': operator.lt,
+      'sle': operator.le}[term.pred](x,y)
+
+    return bool_to_BitVec(cmp), dx+dy, px+py
   
   def SelectInst(self, term):
     c,dc,pc = self(term.sel)
@@ -267,19 +153,19 @@ def check_refinement_at(type_model, src, tgt):
   
   s = z3.Solver()
   s.add(sd, z3.Not(td))
-  print s
+  logger.debug('undef check\n%s', s)
   if s.check() != z3.unsat:
     return 'undefined', s.model()
   
   s = z3.Solver()
   s.add(sd, sp, z3.Not(tp))
-  print s
+  logger.debug('poison check\n%s', s)
   if s.check() != z3.unsat:
     return 'poison', s.model()
   
   s = z3.Solver()
   s.add(sd, sp, sv != tv)
-  print s
+  logger.debug('equality check\n%s', s)
   if s.check() != z3.unsat:
     return 'unequal', s.model()
   
@@ -291,6 +177,7 @@ def check_refinement(e1, e2):
   T.eq_types(e1,e2)
   
   for m in T.z3_models():
+    logger.debug('using model %s', m)
     r = check_refinement_at(m, e1, e2)
     if r:
       return r
@@ -306,3 +193,10 @@ def interp(e):
   
   smt = SMTTranslator(m)
   return smt(e)
+
+
+if __name__ == '__main__':
+  #logging.basicConfig(level=logging.DEBUG)
+
+  r = check_refinement(IcmpInst('ult', Input('x'), Literal(0)), Literal(0))
+  print r if r else 'Okay'

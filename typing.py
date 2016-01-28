@@ -178,6 +178,7 @@ class TypeConstraints(BaseTypeConstraints):
   def z3_solver(self, maxwidth=64, depth=0):
     self.simplify_orderings()
     s = z3.Solver()
+    # this stops working if we use SolverFor('QF_LIA') for unclear reasons
     
     vars = {}
     var = 0

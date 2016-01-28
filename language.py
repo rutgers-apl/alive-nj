@@ -229,7 +229,7 @@ class BaseTypeConstraints(Visitor):
 
   def Literal(self, term):
     self.integer(term)
-    self.width_ceiling(term.val.bit_length(), term)
+    self.width_ceiling(term.val.bit_length()-1, term)
       # FIXME: bit_length() is nonsensical for negative numbers
 
   def BinaryCnxp(self, term):
