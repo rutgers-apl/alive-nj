@@ -28,8 +28,19 @@ class IntType(Type):
 # DAG Nodes
 # ---------
 
+class MetaNode(type):
+  'Automatically generate a superclass table for Node classes'
+  def __init__(cls, name, bases, dict):
+    if not hasattr(cls, 'registry'):
+      cls.registry = {}
+    else:
+      cls.registry[name] = bases[0].__name__
+
+    return super(MetaNode, cls).__init__(cls, bases, dict)
 
 class Node(object):
+  __metaclass__ = MetaNode
+
 #   def __repr__(self):
 #     return type(self).__name__ + '()'
   
@@ -47,7 +58,7 @@ class Input(Value):
     self.type = None
   
   def __repr__(self):
-    return 'Value({0.name!r})'.format(self)
+    return 'Input({0.name!r})'.format(self)
 
 class Instruction(Value):
   pass
@@ -144,7 +155,8 @@ class SelectInst(Instruction):
     return 'SelectInst({0.sel!r}, {0.arg1!r}, {0.arg2!r}, {0.ty1!r}, {0.ty2!r})'.format(self)
 
 
-# --
+# Constants
+# ---------
 
 class Constant(Value):
   pass
@@ -171,23 +183,42 @@ class UnaryCnxp(Constant):
 class UnmatchedCase(Exception):
   pass
 
-_classes = (Value, Input, Instruction, BinaryOperator, AddInst, SubInst,
-  MulInst, SDivInst, UDivInst, SRemInst, URemInst, ShlInst, AShrInst, LShrInst,
-  AddInst, OrInst, XorInst, ConversionInst, SExtInst, ZExtInst, TruncInst,
-  IcmpInst, SelectInst,
-  Constant, Literal, BinaryCnxp, UnaryCnxp)
+class MetaVisitor(type):
+  '''Fill out the visiting functions which aren't explicitly defined by a
+  class or its bases.
 
-_parent = { c.__name__: c.__bases__[0].__name__ for c in _classes }
+  NOTE: it's better to subclass Visitor than use this directly.
+  '''
+
+  def __new__(cls, name, bases, dict):
+    visiting = [f for f in dict if f in Node.registry or f == 'Node']
+
+    # add explicit methods in the base classes
+    for b in bases:
+      if not hasattr(b, '_visiting'): continue
+      for f in b._visiting:
+        if f in dict: continue
+        dict[f] = getattr(b, f)
+        visiting.append(f)
+
+    dict['_visiting'] = tuple(visiting)
+    assert 'Node' in dict
+
+    # direct all non-explicitly defined visiting methods to their parents
+    for f,p in Node.registry.iteritems():
+      if f in dict: continue
+      while p not in dict: p = Node.registry[p]
+      dict[f] = dict[p]
+
+    return super(MetaVisitor, cls).__new__(cls, name, bases, dict)
 
 class Visitor(object):
-  def Node(self, *args, **kws):
-    raise UnmatchedCase
+  __metaclass__ = MetaVisitor
+
+  def Node(self, term, *args, **kws):
+    raise UnmatchedCase('Visitor {0!r} cannot handle class {1!r}'.format(
+      type(self).__name__, type(term).__name__))
   
-  def __getattr__(self, name):
-    if name in _parent:
-      return getattr(self, _parent[name])
-    
-    raise AttributeError('{0!r} object has no attribute {1!r}'.format(type(self).__name__, name))
   
 class BaseTypeConstraints(Visitor):
   def Input(self, term):
