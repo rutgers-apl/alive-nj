@@ -140,13 +140,89 @@ class SMTTranslator(Visitor):
   def Literal(self, term):
     return z3.BitVecVal(term.val, self.bits(term)), [], []
 
-def check_refinement_at(type_model, src, tgt):
+  # NOTE: constant expressions do no introduce poison or definedness constraints
+  #       is this reasonable?
+  AddCnxp = _mk_bop(operator.add)
+  SubCnxp = _mk_bop(operator.sub)
+  MulCnxp = _mk_bop(operator.mul)
+  SDivCnxp = _mk_bop(operator.div)
+  UDivCnxp = _mk_bop(z3.UDiv)
+  SRemCnxp = _mk_bop(z3.SRem)
+  URemCnxp = _mk_bop(z3.URem)
+  ShlCnxp = _mk_bop(operator.lshift)
+  AShrCnxp = _mk_bop(operator.rshift)
+  LShrCnxp = _mk_bop(z3.LShR)
+  AndCnxp = _mk_bop(operator.and_)
+  OrCnxp = _mk_bop(operator.or_)
+  XorCnxp = _mk_bop(operator.xor)
+
+  def NotCnxp(self, term):
+    x,dx,px = self(term.x)
+    return ~x,dx,px
+
+  def NegCnxp(self, term):
+    x,dx,px = self(term.x)
+    return -x,dx,px
+
+  def WidthCnxp(self, term):
+    return z3.BitVecVal(self.bits(term.args[0]), self.bits(term)), [], []
+    # NOTE: nothing bad should happen if we don't evaluate the argument
+
+  def AndPred(self, term):
+    bs = []
+    ds = []
+    ps = []
+    for cl in term.clauses:
+      b,d,p = self(cl)
+      bs.append(b)
+      ds += d
+      ps += p
+
+    return z3.And(bs), ds, ps
+
+  def OrPred(self, term):
+    bs = []
+    ds = []
+    ps = []
+    for cl in term.clauses:
+      b,d,p = self(cl)
+      bs.append(b)
+      ds += d
+      ps += p
+
+    return z3.Or(bs), ds, ps
+
+  def Comparison(self, term):
+    cmp = {
+      'eq': operator.eq,
+      'ne': operator.ne,
+      'ugt': z3.UGT,
+      'uge': z3.UGE,
+      'ult': z3.ULT,
+      'ule': z3.ULE,
+      'sgt': operator.gt,
+      'sge': operator.ge,
+      'slt': operator.lt,
+      'sle': operator.le}[term.op]
+
+    x,dx,px = self(term.x)
+    y,dy,py = self(term.y)
+    return cmp(x,y), dx+dy, px+py
+
+  def IntMinPred(self, term):
+    x,dx,px = self(term.args[0])
+
+    return x == 1 << (x.size()-1), dx, []
+
+def check_refinement_at(type_model, src, tgt, pre):
   smt = SMTTranslator(type_model)
   
   sv,sd,sp = smt(src)
   tv,td,tp = smt(tgt)
+  pb,pd,pp = smt(pre)
   
-  sd = z3.And(sd)
+  # NOTE: should we require sd => pd?
+  sd = z3.And(sd + [pb] + pd)
   sp = z3.And(sp)
   td = z3.And(td)
   tp = z3.And(tp)
@@ -172,15 +248,17 @@ def check_refinement_at(type_model, src, tgt):
   return None
 
 
-def check_refinement(e1, e2):
+def check_refinement(e1, e2, pre=TruePred):
   T = TypeConstraints()
   T.eq_types(e1,e2)
+  pre.accept(T)
   
   for m in T.z3_models():
     logger.debug('using model %s', m)
-    r = check_refinement_at(m, e1, e2)
+    r = check_refinement_at(m, e1, e2, pre)
     if r:
       return r
+
 
   return None
   
@@ -196,7 +274,31 @@ def interp(e):
 
 
 if __name__ == '__main__':
-  #logging.basicConfig(level=logging.DEBUG)
+  logging.basicConfig() #level=logging.DEBUG)
 
   r = check_refinement(IcmpInst('ult', Input('x'), Literal(0)), Literal(0))
+  print r if r else 'Okay'
+
+# Pre: C1 < C2
+# %Op0 = ashr exact %X, C1
+# %r = shl i33 %Op0, C2
+#   =>
+# %r = shl %X, C2-C1
+
+  C1 = Input('C1')
+  C2 = Input('C2')
+  x = Input('%X')
+
+  op0 = AShrInst(x, C1, flags=['exact'])
+  rs = ShlInst(op0, C2)
+  rt = ShlInst(x, SubCnxp(C2,C1))
+  pre = Comparison('slt',C1,C2)
+
+  r = check_refinement(rs,rt,pre)
+  print r if r else 'Okay'
+
+  pre = IntMinPred(C1)
+  src = AddInst(XorInst(x,C1),C2)
+  tgt = AddInst(x, XorCnxp(C1,C2))
+  r = check_refinement(src,tgt,pre)
   print r if r else 'Okay'

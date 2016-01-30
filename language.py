@@ -135,7 +135,7 @@ class TruncInst(ConversionInst):
 
 class IcmpInst(Instruction):
   def __init__(self, pred, arg1, arg2, ty = None):
-    self.pred = pred # FIXME -- something better
+    self.pred = pred # FIXME: handle comparison ops better somehow?
     self.ty   = ty
     self.x    = arg1
     self.y    = arg2
@@ -166,15 +166,95 @@ class Literal(Constant):
     self.val = val
 # TODO: need type for null?
 
+  def __repr__(self):
+    return 'Literal({0!r})'.format(self.val)
+
 class BinaryCnxp(Constant):
   def __init__(self, x, y):
     self.x = x
     self.y = y
 
+  def __repr__(self):
+    return '{0.__name__}({1.x!r}, {1.y!r})'.format(type(self), self)
+
+class AddCnxp(BinaryCnxp): pass
+class SubCnxp(BinaryCnxp): pass
+class MulCnxp(BinaryCnxp): pass
+class SDivCnxp(BinaryCnxp): pass
+class UDivCnxp(BinaryCnxp): pass
+class SRemCnxp(BinaryCnxp): pass
+class URemCnxp(BinaryCnxp): pass
+class ShlCnxp(BinaryCnxp): pass
+class AShrCnxp(BinaryCnxp): pass
+class LShrCnxp(BinaryCnxp): pass
+class AndCnxp(BinaryCnxp): pass
+class OrCnxp(BinaryCnxp): pass
+class XorCnxp(BinaryCnxp): pass
+
+
+# NOTE: do we need these?
 class UnaryCnxp(Constant):
   def __init__(self, x):
     self.x = x
 
+  def __repr__(self):
+    return '{0.__name__}({1.x!r})'.format(type(self), self)
+
+class NegCnxp(UnaryCnxp): pass
+class NotCnxp(UnaryCnxp): pass
+
+
+class FunCnxp(Constant):
+  def __init__(self, *args):
+    self.args = args
+    assert len(args) == self.arity
+  
+  def __repr__(self):
+    return type(self).__name__ + '(' + ', '.join(repr(a) for a in self.args) + ')'
+
+class WidthCnxp(FunCnxp): arity = 1
+
+# Predicates
+# ----------
+
+class Predicate(Node):
+  pass
+
+class AndPred(Predicate):
+  def __init__(self, *clauses):
+    self.clauses = clauses
+
+  def __repr__(self):
+    return 'AndPred(' + ', '.join(repr(a) for a in self.clauses) + ')'
+
+TruePred = AndPred()
+
+class OrPred(Predicate):
+  def __init__(self, *clauses):
+    self.clauses = clauses
+
+  def __repr__(self):
+    return 'OrPred(' + ', '.join(repr(a) for a in self.clauses) + ')'
+
+class Comparison(Predicate):
+  def __init__(self, op, x, y):
+    self.op = op
+    self.x  = x
+    self.y  = y
+# Better ops as subclasses?
+
+  def __repr__(self):
+    return 'Comparison({0.op!r}, {0.x!r}, {0.y!r})'.format(self)
+
+class FunPred(Predicate):
+  def __init__(self, *args):
+    self.args = args
+    assert len(args) == self.arity
+
+  def __repr__(self):
+    return type(self).__name__ + '(' + ', '.join(repr(a) for a in self.args) + ')'
+
+class IntMinPred(FunPred): arity = 1
 
 
 # Visitor
@@ -260,11 +340,35 @@ class BaseTypeConstraints(Visitor):
 
   def Literal(self, term):
     self.integer(term)
-    self.width_ceiling(term.val.bit_length()-1, term)
-      # FIXME: bit_length() is nonsensical for negative numbers
+
+    x = term.val
+    bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
+    self.width_ceiling(x-1, term)  # -1 because the ceiling is a hard limit
 
   def BinaryCnxp(self, term):
-    self.eq_types(term.x, term.y)
+    self.integer(term)
+    self.eq_types(term, term.x, term.y)
   
   def UnaryCnxp(self, term):
-    self.eq_types(term.x)
+    self.integer(term)
+    self.eq_types(term, term.x)
+
+  def WidthCnxp(self, term):
+    self.integer(term)
+    self.integer(term.args[0])
+    # NOTE: return type of width may be too small to hold value
+
+  def AndPred(self, term):
+    for p in term.clauses:
+      p.accept(self)
+
+  def OrPred(self, term):
+    for p in term.clauses:
+      p.accept(self)
+
+  def Comparison(self, term):
+    self.eq_types(term.x, term.y)
+
+  def IntMinPred(self, term):
+    self.integer(term.args[0])
+  # TODO: handle llvm preconditions

@@ -93,7 +93,8 @@ class TypeConstraints(BaseTypeConstraints):
   def ensure(self, term):
     if term in self.sets:
       return
-    
+
+    assert isinstance(term, Value)
     logger.debug('adding term %s', term)
     self.sets.add_key(term)
     term.accept(self)
@@ -208,9 +209,11 @@ class TypeConstraints(BaseTypeConstraints):
     
     if s.check() != z3.sat:
       raise IncompatibleConstraints
-    
-    nonfixed = [v for r,v in vars.iteritems() if r not in self.specifics]
-    
+
+    nonfixed = [v for r,v in vars.iteritems()
+                  if r not in self.specifics and
+                     self.constraints.get(r, FIRST_CLASS) != BOOL]
+
     while s.check() == z3.sat:
       model = s.model()
       yield { k: model[vars[r]] for k,r in self.sets.key_reps() }
