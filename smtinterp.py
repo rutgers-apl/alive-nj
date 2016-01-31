@@ -192,6 +192,10 @@ class SMTTranslator(Visitor):
 
     return z3.Or(bs), ds, ps
 
+  def NotPred(self, term):
+    p,dp,pp = self(term.p)
+    return z3.Not(p),dp,pp
+
   def Comparison(self, term):
     cmp = {
       'eq': operator.eq,

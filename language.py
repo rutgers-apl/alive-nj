@@ -236,6 +236,13 @@ class OrPred(Predicate):
   def __repr__(self):
     return 'OrPred(' + ', '.join(repr(a) for a in self.clauses) + ')'
 
+class NotPred(Predicate):
+  def __init__(self, p):
+    self.p = p
+
+  def __repr__(self):
+    return 'NotPred(' + repr(self.p) + ')'
+
 class Comparison(Predicate):
   def __init__(self, op, x, y):
     self.op = op
@@ -365,6 +372,9 @@ class BaseTypeConstraints(Visitor):
   def OrPred(self, term):
     for p in term.clauses:
       p.accept(self)
+
+  def NotPred(self, term):
+    term.p.accept(self)
 
   def Comparison(self, term):
     self.eq_types(term.x, term.y)
