@@ -164,8 +164,58 @@ class SMTTranslator(Visitor):
     x,dx,px = self(term.x)
     return -x,dx,px
 
+  def AbsCnxp(self, term):
+    x,dx,px = self(term._args[0])
+
+    return z3.If(a >= 0, a, -a), dx, px
+
+#   def SignBitsCnxp(self, term):
+#     x,dx,px = self(term._args[0])
+
+#   def OneBitsCnxp(self, term):
+#   def ZeroBitsCnxp(self, term):
+#   def LeadingZerosCnxp(self, term):
+#   def TrailingZerosCnxp(self, term):
+#   def Log2Cnxp(self, term):
+
+  def LShrFunCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+    
+    return z3.LShR(x,y), dx+dy, px+py
+
+  def SMaxCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+    
+    return z3.If(x > y, x, y), dx+dy, px+py
+
+  def UMaxCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+    
+    return z3.If(z3.UGT(x,y), x, y), dx+dy, px+py
+
+  def SExtCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    
+    bits = self.bits(term)
+    return z3.SignExt(bits - x.size(), x), dx, px
+
+  def ZExtCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    
+    bits = self.bits(term)
+    return z3.ZeroExt(bits - x.size(), x), dx, px
+
+  def TruncCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    
+    bits = self.bits(term)
+    return z3.Extract(bits-1, 0, x), dx, px
+
   def WidthCnxp(self, term):
-    return z3.BitVecVal(self.bits(term.args[0]), self.bits(term)), [], []
+    return z3.BitVecVal(self.bits(term._args[0]), self.bits(term)), [], []
     # NOTE: nothing bad should happen if we don't evaluate the argument
 
   def AndPred(self, term):
@@ -214,19 +264,27 @@ class SMTTranslator(Visitor):
     return cmp(x,y), dx+dy, px+py
 
   def IntMinPred(self, term):
-    x,dx,px = self(term.args[0])
+    x,dx,px = self(term._args[0])
 
     return x == 1 << (x.size()-1), dx, []
 
-def check_refinement_at(type_model, src, tgt, pre):
+  def Power2Pred(self, term):
+    x,dx,px = self(term._args[0])
+    
+    return z3.And(x != 0, x & (x-1) == 0), dx, px
+    # FIXME: s.b. must analysis
+
+def check_refinement_at(type_model, src, tgt, pre=None):
   smt = SMTTranslator(type_model)
   
   sv,sd,sp = smt(src)
   tv,td,tp = smt(tgt)
-  pb,pd,pp = smt(pre)
+  if pre:
+    pb,pd,pp = smt(pre)
+    sd += [pb] + pd
+    # NOTE: should we require sd => pd?
   
-  # NOTE: should we require sd => pd?
-  sd = z3.And(sd + [pb] + pd)
+  sd = z3.And(sd)
   sp = z3.And(sp)
   td = z3.And(td)
   tp = z3.And(tp)
@@ -252,7 +310,7 @@ def check_refinement_at(type_model, src, tgt, pre):
   return None
 
 
-def check_refinement(e1, e2, pre=TruePred):
+def check_refinement(e1, e2, pre=None):
   T = TypeConstraints()
   T.eq_types(e1,e2)
   pre.accept(T)
