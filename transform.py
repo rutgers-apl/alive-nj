@@ -23,14 +23,16 @@ class Transform(object):
     t = TypeConstraints()
     t.eq_types(self.src, self.tgt)
     if self.pre:
+      old_reps = tuple(t.sets.reps())
       self.pre.accept(t)
 
-      # check whether any sets contain only precondition terms
-      pre_terms = subterms(self.pre)
-      for r,ss in t.sets.subset_items():
-        if ss.issubset(pre_terms):
-          logger.debug('%s: Setting prefix-only term %r', self.name, r)
-          t.specific(r, IntType(64))
+      # check each set to see if it contains only prefix terms
+      for r in t.sets.reps():
+        if any(t.sets.rep(s) == r for s in old_reps):
+          continue
+
+        logger.debug('%s: Setting prefix-only term %r', self.name, r)
+        t.specific(r, IntType(64))
 
     return t
 

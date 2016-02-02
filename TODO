@@ -1,6 +1,6 @@
 - finish interp for constant & predicate functions
 - must analyses
+- seperate type checking of source and souce+target
 - counterexample reporting
 - undef
-- unconstrained type variables in precondition
 - copy-operand

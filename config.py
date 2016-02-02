@@ -42,13 +42,13 @@ logs = {
   },
   
   'root': {
-    'level': 'INFO',
+    'level': 'WARNING',
     'handlers': ['default', 'warnings']
   },
   
   'loggers': {
-    'smtinterp': {
-      'level': 'DEBUG',
-    }
+#     'smtinterp': {
+#       'level': 'WARNING',
+#     }
   }
 }
