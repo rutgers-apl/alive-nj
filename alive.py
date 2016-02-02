@@ -14,6 +14,7 @@ def check_opt(opt, chatty=True):
   for m in opt.z3_models():
     r = opt.check_refinement(m)
     if r:
+      logging.warning('Optimization %r incorrect: %s', opt.name, r)
       if chatty:
         print '\nOptimization is incorrect!'
         print r
