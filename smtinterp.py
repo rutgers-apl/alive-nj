@@ -4,9 +4,15 @@ Translate expressions into SMT via Z3
 
 from language import *
 from typing import TypeConstraints
+from z3util import *
 import z3, operator, logging
 
+
 logger = logging.getLogger(__name__)
+
+def is_const(term):
+  return isinstance(term, Constant) or \
+    (isinstance(term, Input) and term.name[0] == 'C')
 
 def _mk_bop(op, defined = None, poisons = None):
   def bop(self, term):
@@ -24,14 +30,37 @@ def _mk_bop(op, defined = None, poisons = None):
   
   return bop
 
-def bool_to_BitVec(b):
-  return z3.If(b, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))
+def _mk_must_analysis(op):
+  def pred(self, term):
+    x,dx,px = self(term._args[0])
+
+    if is_const(x):
+      return op(x),dx,px
+
+    c = self.fresh_bool()
+    return c, dx+[z3.Implies(c,op(x))], px
+
+  return pred
+
+def _mk_bin_must_analysis(op):
+  def bop(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+
+    if all(is_const(a) for a in term._args):
+      return op(x,y),dx+dy,px+py
+
+    c = self.fresh_bool()
+    return c, dx+dy+[z3.Implies(c,op(x,y))], px+py
+
+  return bop
 
 
 class SMTTranslator(Visitor):
   def __init__(self, type_model):
     self.types = type_model
     self.terms = {}  # term -> SMT eval * defined * nonpoison
+    self.fresh = 0
 
   def __call__(self, term):
     if term not in self.terms:
@@ -41,6 +70,14 @@ class SMTTranslator(Visitor):
   
   def bits(self, term):
     return self.types[term].arg(0).as_long()  # TODO: improve type -> bitwidth
+
+  def fresh_bool(self):
+    self.fresh += 1
+    return z3.Bool('ana_' + str(self.fresh))
+
+  def fresh_bv(self, size):
+    self.fresh += 1
+    return z3.BitVec('ana_' + str(self.fresh), size)
 
   def Input(self, term):
     # TODO: unique name check
@@ -167,50 +204,77 @@ class SMTTranslator(Visitor):
   def AbsCnxp(self, term):
     x,dx,px = self(term._args[0])
 
-    return z3.If(a >= 0, a, -a), dx, px
+    return z3.If(x >= 0, x, -x), dx, px
 
-#   def SignBitsCnxp(self, term):
-#     x,dx,px = self(term._args[0])
+  def SignBitsCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    size = self.bits(term)
 
-#   def OneBitsCnxp(self, term):
-#   def ZeroBitsCnxp(self, term):
-#   def LeadingZerosCnxp(self, term):
-#   def TrailingZerosCnxp(self, term):
-#   def Log2Cnxp(self, term):
+    #b = ComputeNumSignBits(self.fresh_bv(size), size)
+    b = self.fresh_bv(size)
+
+    return b, dx + [z3.ULE(b, ComputeNumSignBits(x, size))], px
+
+  def OneBitsCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    b = self.fresh_bv(x.size())
+
+    return b, dx+[b & ~x == 0], px
+
+  def ZeroBitsCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    b = self.fresh_bv(x.size())
+
+    return b, dx+[b & x == 0], px
+
+  def LeadingZerosCnxp(self, term):
+    x,dx,px = self(term._args[0])
+
+    return ctlz(x, self.bits(term)), dx, px
+
+  def TrailingZerosCnxp(self, term):
+    x,dx,px = self(term._args[0])
+    
+    return cttz(x, self.bits(term)), dx, px
+
+  def Log2Cnxp(self, term):
+    x,dx,px = self(term._args[0])
+
+    return bv_log2(x, self.bits(term)), dx, px
 
   def LShrFunCnxp(self, term):
     x,dx,px = self(term._args[0])
     y,dy,py = self(term._args[1])
-    
+
     return z3.LShR(x,y), dx+dy, px+py
 
   def SMaxCnxp(self, term):
     x,dx,px = self(term._args[0])
     y,dy,py = self(term._args[1])
-    
+
     return z3.If(x > y, x, y), dx+dy, px+py
 
   def UMaxCnxp(self, term):
     x,dx,px = self(term._args[0])
     y,dy,py = self(term._args[1])
-    
+
     return z3.If(z3.UGT(x,y), x, y), dx+dy, px+py
 
   def SExtCnxp(self, term):
     x,dx,px = self(term._args[0])
-    
+
     bits = self.bits(term)
     return z3.SignExt(bits - x.size(), x), dx, px
 
   def ZExtCnxp(self, term):
     x,dx,px = self(term._args[0])
-    
+
     bits = self.bits(term)
     return z3.ZeroExt(bits - x.size(), x), dx, px
 
   def TruncCnxp(self, term):
     x,dx,px = self(term._args[0])
-    
+
     bits = self.bits(term)
     return z3.Extract(bits-1, 0, x), dx, px
 
@@ -268,11 +332,61 @@ class SMTTranslator(Visitor):
 
     return x == 1 << (x.size()-1), dx, []
 
-  def Power2Pred(self, term):
+  Power2Pred = _mk_must_analysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
+  Power2OrZPred = _mk_must_analysis(lambda x: x & (x-1) == 0)
+
+  def ShiftedMaskPred(self, term):
     x,dx,px = self(term._args[0])
-    
-    return z3.And(x != 0, x & (x-1) == 0), dx, px
-    # FIXME: s.b. must analysis
+
+    v = (x - 1) | x
+    return z3.And(v != 0, ((v+1) & v) == 0), dx, px
+
+  MaskZeroPred = _mk_bin_must_analysis(lambda x,y: x & y == 0)
+
+  NSWAddPred = _mk_bin_must_analysis(
+    lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y))
+
+  NUWAddPred = _mk_bin_must_analysis(
+    lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y))
+
+  NSWSubPred = _mk_bin_must_analysis(
+    lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y))
+
+  NUWSubPred = _mk_bin_must_analysis(
+    lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
+
+  def NSWMulPred(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+
+    size = x.size()
+    expr = z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
+
+    return expr, dx+dy, px+py
+
+  def NUWMulPred(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+
+    size = x.size()
+    expr = z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
+
+    return expr, dx+dy, px+py
+
+  def NUWShlPred(self, term):
+    x,dx,px = self(term._args[0])
+    y,dy,py = self(term._args[1])
+
+    size = x.size()
+
+    return z3.LShR(x << y, y) == x, dx+dy, px+py
+
+  def OneUsePred(self, term):
+    return z3.BoolVal(True), [], []
+    # NOTE: should this have semantics?
+
+
+
 
 def check_refinement_at(type_model, src, tgt, pre=None):
   smt = SMTTranslator(type_model)
