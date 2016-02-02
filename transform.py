@@ -18,14 +18,24 @@ class Transform(object):
     self.tgt = tgt
     self.replace = tuple(replacements) if replacements else ()
 
-  def z3_models(self):
-    logger.debug('Gathering type constraints for ' + repr(self.name))
+  def type_constraints(self):
+    logger.debug('%s: Gathering type constraints', self.name)
     t = TypeConstraints()
     t.eq_types(self.src, self.tgt)
     if self.pre:
       self.pre.accept(t)
-    
-    return t.z3_models()
+
+      # check whether any sets contain only precondition terms
+      pre_terms = subterms(self.pre)
+      for r,ss in t.sets.subset_items():
+        if ss.issubset(pre_terms):
+          logger.debug('%s: Setting prefix-only term %r', self.name, r)
+          t.specific(r, IntType(64))
+
+    return t
+
+  def z3_models(self):
+    return self.type_constraints().z3_models()
 
   def check_refinement(self, model):
     # TODO: check all replacements
@@ -88,6 +98,23 @@ def get_insts(v):
   insts = []
   walk(v, insts, seen)
   return insts
+
+def subterms(term):
+  'Return all subterms of the provided term'
+
+  queue = [term]
+  seen = set()
+
+  while queue:
+    t = queue.pop()
+    if t in seen: continue
+
+    seen.add(t)
+    args = t.args()
+    queue.extend(args)
+
+  return seen
+
 
 class Formatter(Visitor):
   def __init__(self):
