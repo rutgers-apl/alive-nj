@@ -1,0 +1,7 @@
+Name: InstCombineShift: 807
+Pre: C == (width(%X) - width(%x))
+%X = zext %x
+%Op0 = shl %X, C
+%r = ashr i33 %Op0, C
+=>
+%r = sext %x
