@@ -80,8 +80,8 @@ Pre: hasOneUse(%op) && C2 & lshr(-1, C1) == C2
 %op = ashr %X, C1
 %r = and %op, C2
   =>
-%op  = lshr %X, C1
-%r = and %op, C2
+%op.  = lshr %X, C1
+%r = and %op., C2
 
 
 Name: AndOrXor:270

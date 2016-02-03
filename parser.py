@@ -522,25 +522,17 @@ def parseTransform(s,l,t):
     pre = t.pre[0].condition(src)
   else:
     pre = None
-
-  # register names used in target
-  tregs = [i.name() for i in t.tgt]
   
-  if tregs[-1] != root:
+  if t.tgt[-1].name() != root:
     t.tgt[-1]._fatal('Target root must redefine source (' + root + ')')
 
-  # copy inputs to target
-  tgt = collections.OrderedDict(
-    [(k,v) for k,v in src.iteritems() if k not in tregs])
-  # FIXME: this will choke if the target refers to a source instr
-  #        that references a value redefined by the target
+  # copy inputs to target, excluding root
+  tgt = src.copy()
+  tgt.pop(root)
 
   for i in t.tgt: i.eval(tgt, Phase.Target)
 
-  tregs.pop()
-  replacements = [(src[r], tgt[r]) for r in tregs if r in src]
-
-  return Transform(src[root], tgt[root], pre, name, replacements)
+  return Transform(src[root], tgt[root], pre, name)
 
 comment = Literal(';') + restOfLine()
 continuation = '\\' + LineEnd()

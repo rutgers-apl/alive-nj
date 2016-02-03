@@ -11,12 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class Transform(object):
-  def __init__(self, src, tgt, pre=None, name='', replacements=None):
+  def __init__(self, src, tgt, pre=None, name=''):
     self.name = name
     self.pre = pre
     self.src = src
     self.tgt = tgt
-    self.replace = tuple(replacements) if replacements else ()
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)
@@ -40,17 +39,7 @@ class Transform(object):
     return self.type_constraints().z3_models()
 
   def check_refinement(self, model):
-    # TODO: check all replacements
-
-    for s,t in self.replace:
-      logger.info('Checking intermediate refinement %r, %r', s, t)
-
-      r = check_refinement_at(model, s, t, self.pre)
-      if r:
-        logger.info('Refinement check failed %r', r)
-        return r
-
-    logger.info('Checking refinement for root')
+    logger.info('%s: Checking refinement', self.name)
     r = check_refinement_at(model, self.src, self.tgt, self.pre)
     if r:
       logger.info('Check failed %r', r)
@@ -75,9 +64,6 @@ class Transform(object):
       s += 'Pre: ' + self.pre.accept(f) + '\n'
     
     s += '\n'.join(src_lines) + '\n=>\n'
-    
-    for v,_ in self.replace:
-      del f.ids[v]
 
     tgti = get_insts(self.tgt)
     s += '\n'.join(i.accept(f) for i in tgti if i not in f.ids)
