@@ -64,7 +64,9 @@ class LitWordAst(ValAst):
       return L.Literal(1)
     if v == 'false':
       return L.Literal(0)
-    
+    if v == 'undef':
+      return L.UndefValue(ty)
+
     self._fatal('Unrecognized literal {0!r}'.format(v))
 
 class Name(ValAst):

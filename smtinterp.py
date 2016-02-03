@@ -17,42 +17,44 @@ def is_const(term):
 
 def _mk_bop(op, defined = None, poisons = None):
   def bop(self, term):
-    x,dx,px = self(term.x)
-    y,dy,py = self(term.y)
-    
-    nonpoison = px+py
+    x = self(term.x)
+    y = self(term.y)
+
+    if defined:
+      self.add_defs(*defined(x,y))
+
     if poisons:
       for f in term.flags:
-        nonpoison.append(poisons[f](x,y))
-
-    d = dx + dy + (defined(x,y) if defined else [])
+        self.add_nops(poisons[f](x,y))
   
-    return op(x,y), d, nonpoison
+    return op(x,y)
   
   return bop
 
 def _mk_must_analysis(op):
   def pred(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
     if is_const(x):
-      return op(x),dx,px
+      return op(x)
 
     c = self.fresh_bool()
-    return c, dx+[z3.Implies(c,op(x))], px
+    self.add_defs(z3.Implies(c, op(x)))
+    return c
 
   return pred
 
 def _mk_bin_must_analysis(op):
   def bop(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
     if all(is_const(a) for a in term._args):
-      return op(x,y),dx+dy,px+py
+      return op(x,y)
 
     c = self.fresh_bool()
-    return c, dx+dy+[z3.Implies(c,op(x,y))], px+py
+    self.add_defs(z3.Implies(c, op(x,y)))
+    return c
 
   return bop
 
@@ -62,13 +64,47 @@ class SMTTranslator(Visitor):
     self.types = type_model
     self.terms = {}  # term -> SMT eval * defined * nonpoison
     self.fresh = 0
+    self.defs = []  # current defined-ness conditions
+    self.nops = []  # current non-poison conditions
+    self.qvars = []
 
   def __call__(self, term):
     if term not in self.terms:
-      self.terms[term] = term.accept(self)
-    
-    return self.terms[term]
+      self.eval(term)
+
+    v,d,p = self.terms[term]
+    self.defs += d
+    self.nops += p
+
+    return v
+
+  def eval(self, term):
+    # save defs and nops
+    defs = self.defs
+    nops = self.nops
+    self.defs = []
+    self.nops = []
+
+    # evaluate term in new context
+    v = term.accept(self)
+    r = (v, self.defs, self.nops)
+    self.terms[term] = r
+
+    # restore defs and nops
+    self.defs = defs
+    self.nops = nops
+
+    return r
+
+  def add_defs(self, *defs):
+    self.defs += defs
+
+  def add_nops(self, *nops):
+    self.nops += nops
   
+  def add_qvar(self, *qvars):
+    self.qvars += qvars
+
   def bits(self, term):
     Ty = self.types[term]
     if Ty.decl().eq(TySort.integer):
@@ -83,13 +119,13 @@ class SMTTranslator(Visitor):
     self.fresh += 1
     return z3.Bool('ana_' + str(self.fresh))
 
-  def fresh_bv(self, size):
+  def fresh_bv(self, size, prefix='ana_'):
     self.fresh += 1
-    return z3.BitVec('ana_' + str(self.fresh), size)
+    return z3.BitVec(prefix + str(self.fresh), size)
 
   def Input(self, term):
     # TODO: unique name check
-    return z3.BitVec(term.name, self.bits(term)), [], []
+    return z3.BitVec(term.name, self.bits(term))
 
   AddInst = _mk_bop(operator.add,
     poisons =
@@ -141,37 +177,37 @@ class SMTTranslator(Visitor):
 
 
   def SExtInst(self, term):
-    v,d,p = self(term.arg)
+    v = self(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
-    return z3.SignExt(tgt - src, v), d, p
+    return z3.SignExt(tgt - src, v)
 
   def ZExtInst(self, term):
-    v,d,p = self(term.arg)
+    v = self(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
-    return z3.ZeroExt(tgt - src, v), d, p
+    return z3.ZeroExt(tgt - src, v)
 
   def TruncInst(self, term):
-    v,d,p = self(term.arg)
+    v = self(term.arg)
     tgt = self.bits(term)
-    return z3.Extract(tgt - 1, 0, v), d, p
+    return z3.Extract(tgt - 1, 0, v)
 
   def ZExtOrTruncInst(self, term):
-    v,d,p = self(term.arg)
+    v = self(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
     
     if tgt == src:
-      return v,d,p
+      return v
     if tgt > src:
-      return z3.ZeroExt(tgt - src, v), d, p
+      return z3.ZeroExt(tgt - src, v)
     
-    return z3.Extract(tgt-1, 0, v), d, p
+    return z3.Extract(tgt-1, 0, v)
 
   def IcmpInst(self, term):
-    x,dx,px = self(term.x)
-    y,dy,py = self(term.y)
+    x = self(term.x)
+    y = self(term.y)
 
     cmp = {
       'eq': operator.eq,
@@ -185,17 +221,22 @@ class SMTTranslator(Visitor):
       'slt': operator.lt,
       'sle': operator.le}[term.pred](x,y)
 
-    return bool_to_BitVec(cmp), dx+dy, px+py
+    return bool_to_BitVec(cmp)
   
   def SelectInst(self, term):
-    c,dc,pc = self(term.sel)
-    x,dx,px = self(term.arg1)
-    y,dy,py = self(term.arg2)
+    c = self(term.sel)
+    x = self(term.arg1)
+    y = self(term.arg2)
     
-    return z3.If(c == 1, x, y), dc+dx+dy, pc+px+py
+    return z3.If(c == 1, x, y)
 
   def Literal(self, term):
-    return z3.BitVecVal(term.val, self.bits(term)), [], []
+    return z3.BitVecVal(term.val, self.bits(term))
+
+  def UndefValue(self, term):
+    x = self.fresh_bv(self.bits(term), prefix='undef_')
+    self.add_qvar(x)
+    return x
 
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
@@ -214,121 +255,106 @@ class SMTTranslator(Visitor):
   XorCnxp = _mk_bop(operator.xor)
 
   def NotCnxp(self, term):
-    x,dx,px = self(term.x)
-    return ~x,dx,px
+    return ~self(term.x)
 
   def NegCnxp(self, term):
-    x,dx,px = self(term.x)
-    return -x,dx,px
+    return -self(term.x)
 
   def AbsCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
-    return z3.If(x >= 0, x, -x), dx, px
+    return z3.If(x >= 0, x, -x)
 
   def SignBitsCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
     size = self.bits(term)
 
     #b = ComputeNumSignBits(self.fresh_bv(size), size)
     b = self.fresh_bv(size)
+    
+    self.add_defs(z3.ULE(b, ComputeNumSignBits(x, size)))
 
-    return b, dx + [z3.ULE(b, ComputeNumSignBits(x, size))], px
+    return b
 
   def OneBitsCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
     b = self.fresh_bv(x.size())
+    
+    self.add_defs(b & ~x == 0)
 
-    return b, dx+[b & ~x == 0], px
+    return b
 
   def ZeroBitsCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
     b = self.fresh_bv(x.size())
+    
+    self.add_defs(b & x == 0)
 
-    return b, dx+[b & x == 0], px
+    return b
 
   def LeadingZerosCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
-    return ctlz(x, self.bits(term)), dx, px
+    return ctlz(x, self.bits(term))
 
   def TrailingZerosCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
     
-    return cttz(x, self.bits(term)), dx, px
+    return cttz(x, self.bits(term))
 
   def Log2Cnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
-    return bv_log2(x, self.bits(term)), dx, px
+    return bv_log2(x, self.bits(term))
 
   def LShrFunCnxp(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
-    return z3.LShR(x,y), dx+dy, px+py
+    return z3.LShR(x,y)
 
   def SMaxCnxp(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
-    return z3.If(x > y, x, y), dx+dy, px+py
+    return z3.If(x > y, x, y)
 
   def UMaxCnxp(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
-    return z3.If(z3.UGT(x,y), x, y), dx+dy, px+py
+    return z3.If(z3.UGT(x,y), x, y)
 
   def SExtCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
     bits = self.bits(term)
-    return z3.SignExt(bits - x.size(), x), dx, px
+    return z3.SignExt(bits - x.size(), x)
 
   def ZExtCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
     bits = self.bits(term)
-    return z3.ZeroExt(bits - x.size(), x), dx, px
+    return z3.ZeroExt(bits - x.size(), x)
 
   def TruncCnxp(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
     bits = self.bits(term)
-    return z3.Extract(bits-1, 0, x), dx, px
+    return z3.Extract(bits-1, 0, x)
 
   def WidthCnxp(self, term):
-    return z3.BitVecVal(self.bits(term._args[0]), self.bits(term)), [], []
+    return z3.BitVecVal(self.bits(term._args[0]), self.bits(term))
     # NOTE: nothing bad should happen if we don't evaluate the argument
 
   def AndPred(self, term):
-    bs = []
-    ds = []
-    ps = []
-    for cl in term.clauses:
-      b,d,p = self(cl)
-      bs.append(b)
-      ds += d
-      ps += p
-
-    return z3.And(bs), ds, ps
+    return z3.And([self(cl) for cl in term.clauses])
 
   def OrPred(self, term):
-    bs = []
-    ds = []
-    ps = []
-    for cl in term.clauses:
-      b,d,p = self(cl)
-      bs.append(b)
-      ds += d
-      ps += p
-
-    return z3.Or(bs), ds, ps
+    return z3.Or([self(cl) for cl in term.clauses])
 
   def NotPred(self, term):
-    p,dp,pp = self(term.p)
-    return z3.Not(p),dp,pp
+    return z3.Not(self(term.p))
 
   def Comparison(self, term):
     cmp = {
@@ -343,23 +369,21 @@ class SMTTranslator(Visitor):
       'slt': operator.lt,
       'sle': operator.le}[term.op]
 
-    x,dx,px = self(term.x)
-    y,dy,py = self(term.y)
-    return cmp(x,y), dx+dy, px+py
+    return cmp(self(term.x), self(term.y))
 
   def IntMinPred(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
-    return x == 1 << (x.size()-1), dx, []
+    return x == 1 << (x.size()-1)
 
   Power2Pred = _mk_must_analysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
   Power2OrZPred = _mk_must_analysis(lambda x: x & (x-1) == 0)
 
   def ShiftedMaskPred(self, term):
-    x,dx,px = self(term._args[0])
+    x = self(term._args[0])
 
     v = (x - 1) | x
-    return z3.And(v != 0, ((v+1) & v) == 0), dx, px
+    return z3.And(v != 0, ((v+1) & v) == 0)
 
   MaskZeroPred = _mk_bin_must_analysis(lambda x,y: x & y == 0)
 
@@ -376,33 +400,27 @@ class SMTTranslator(Visitor):
     lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
 
   def NSWMulPred(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
     size = x.size()
-    expr = z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
-
-    return expr, dx+dy, px+py
+    return z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
 
   def NUWMulPred(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
     size = x.size()
-    expr = z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
-
-    return expr, dx+dy, px+py
+    return z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
 
   def NUWShlPred(self, term):
-    x,dx,px = self(term._args[0])
-    y,dy,py = self(term._args[1])
+    x = self(term._args[0])
+    y = self(term._args[1])
 
-    size = x.size()
-
-    return z3.LShR(x << y, y) == x, dx+dy, px+py
+    return z3.LShR(x << y, y) == x
 
   def OneUsePred(self, term):
-    return z3.BoolVal(True), [], []
+    return z3.BoolVal(True)
     # NOTE: should this have semantics?
 
 
@@ -411,39 +429,52 @@ class SMTTranslator(Visitor):
 def check_refinement_at(type_model, src, tgt, pre=None):
   smt = SMTTranslator(type_model)
   
-  sv,sd,sp = smt(src)
-  tv,td,tp = smt(tgt)
+  sv,sd,sp = smt.eval(src)
+  qvars = smt.qvars
+  smt.qvars = []
+
+  tv,td,tp = smt.eval(tgt)
   if pre:
-    pb,pd,pp = smt(pre)
+    pb,pd,_ = smt.eval(pre)
     sd += [pb] + pd
     # NOTE: should we require sd => pd?
+
+
   
-  
-  s = z3.Solver()
-  s.add(sd)
   if config.poison_undef:
-    s.add(sp)
-  s.add(z3.Not(z3.And(td)))
+    expr = sd + sp + [z3.Not(z3.And(td))]
+  else:
+    expr = sd + [z3.Not(z3.And(td))]
+  
+  if qvars:
+    expr = z3.ForAll(qvars, z3.And(expr))
+
+  s = z3.Solver()
+  s.add(expr)
   logger.debug('undef check\n%s', s)
   if s.check() != z3.unsat:
     return 'undefined', s.model()
   
+  expr = sd + sp + [z3.Not(z3.And(tp))]
+  if qvars:
+    expr = z3.ForAll(qvars, z3.And(expr))
+
   s = z3.Solver()
-  s.add(sd)
-  s.add(sp)
-  s.add(z3.Not(z3.And(tp)))
+  s.add(expr)
   logger.debug('poison check\n%s', s)
   if s.check() != z3.unsat:
     return 'poison', s.model()
   
+  expr = sd + sp + [sv != tv]
+  if qvars:
+    expr = z3.ForAll(qvars, z3.And(expr))
+  
   s = z3.Solver()
-  s.add(sd)
-  s.add(sp)
-  s.add(sv != tv)
+  s.add(expr)
   logger.debug('equality check\n%s', s)
   if s.check() != z3.unsat:
     return 'unequal', s.model()
-  
+
   return None
 
 
@@ -469,7 +500,7 @@ def interp(e):
   m = T.z3_models().next()
   
   smt = SMTTranslator(m)
-  return smt(e)
+  return smt.eval(e)
 
 
 if __name__ == '__main__':

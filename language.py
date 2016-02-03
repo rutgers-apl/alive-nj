@@ -174,6 +174,14 @@ class Literal(Constant):
   def args(self):
     return ()
 
+class UndefValue(Constant):
+  # not sure this is a constant, rather than an arbitrary value
+  def __init__(self, ty = None):
+    self.ty = ty
+
+  def args(self):
+    return ()
+
 class BinaryCnxp(Constant):
   codes = {}
 
@@ -510,6 +518,10 @@ class BaseTypeConstraints(Visitor):
     x = term.val
     bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
     self.width_ceiling(x-1, term)  # -1 because the ceiling is a hard limit
+
+  def UndefValue(self, term):
+    self.first_class(term)
+    self.specific(term, term.ty)
 
   def BinaryCnxp(self, term):
     self.integer(term)

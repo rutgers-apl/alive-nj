@@ -181,6 +181,9 @@ class Formatter(Visitor):
   def Literal(self, term):
     return str(term.val)
 
+  def UndefValue(self, term):
+    return 'undef'
+
   def BinaryCnxp(self, term):
     return '(' + \
       ' '.join((self.operand(term.x), term.code, self.operand(term.y))) + \
