@@ -37,7 +37,7 @@ def meets_constraint(con, ty):
 
 TySort = z3.Datatype('Ty')
 TySort.declare('integer', ('width', z3.IntSort()))
-TySort.declare('pointer', ('target', TySort))
+TySort.declare('pointer')
 TySort = TySort.create()
 
 
@@ -56,17 +56,8 @@ def z3_constraints(con, var, maxwidth=64, depth=1):
       z3_constraints(INT, var, maxwidth, depth)
     )
 
-  if con == PTR and depth > 0:
-    return z3.And(
-      TySort.is_pointer(var),
-      z3_constraints(FIRST_CLASS, TySort.target(var), maxwidth, depth-1)
-    )
-
   if con == PTR:
-    return z3.And(
-      TySort.is_pointer(var),
-      z3_constraints(INT, TySort.target(var), maxwidth, depth)
-    )
+    return TySort.is_pointer(var)
 
   if con == INT:
     return z3.And(
@@ -142,13 +133,16 @@ class TypeConstraints(BaseTypeConstraints):
 
   def integer(self, term):
     self.constrain(term, INT)
-  
+
   def bool(self, term):
     self.constrain(term, BOOL)
   
   def pointer(self, term):
     self.constrain(term, PTR)
   
+  def int_ptr_vec(self, term):
+    self.constrain(term, FIRST_CLASS)
+
   def first_class(self, term):
     self.constrain(term, FIRST_CLASS)
 
@@ -216,6 +210,7 @@ class TypeConstraints(BaseTypeConstraints):
 
     while s.check() == z3.sat:
       model = s.model()
+      logger.debug('solution\n%s', model)
       yield { k: model[vars[r]] for k,r in self.sets.key_reps() }
       
       s.add(z3.Or([v != model[v] for v in nonfixed]))

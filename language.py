@@ -457,7 +457,10 @@ class Visitor(object):
   
 class BaseTypeConstraints(Visitor):
   def Input(self, term):
-    return
+    if term.name[0] == 'C':
+      self.integer(term)
+    else:
+      self.first_class(term)
 
   def BinaryOperator(self, term):
     self.specific(term, term.ty)
@@ -483,12 +486,13 @@ class BaseTypeConstraints(Visitor):
 
   def IcmpInst(self, term):
     self.bool(term)
-    self.first_class(term.x)
+    self.int_ptr_vec(term.x)
     self.specific(term.x, term.ty)
     self.eq_types(term.x, term.y)
 
   def SelectInst(self, term):
     self.bool(term.sel)
+    self.first_class(term.arg1)
     self.specific(term.arg1, term.ty1)
     self.specific(term.arg2, term.ty2)
     self.eq_types(term, term.arg1, term.arg2)
@@ -574,6 +578,7 @@ class BaseTypeConstraints(Visitor):
     term.p.accept(self)
 
   def Comparison(self, term):
+    self.integer(term.x)
     self.eq_types(term.x, term.y)
 
   IntMinPred = _int_monad
