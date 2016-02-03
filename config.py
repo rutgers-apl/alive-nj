@@ -9,6 +9,9 @@ persist = False
 # minimal output
 quiet = False
 
+# allow poison->undefined behavior
+poison_undef = True
+
 # logging configuration. see logging.config docs for schema
 logs = {
   'version': 1,

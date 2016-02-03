@@ -62,12 +62,13 @@ class Transform(object):
 
     if self.pre:
       s += 'Pre: ' + self.pre.accept(f) + '\n'
-    
+
     s += '\n'.join(src_lines) + '\n=>\n'
 
     tgti = get_insts(self.tgt)
     s += '\n'.join(i.accept(f) for i in tgti if i not in f.ids)
-    
+    # FIXME: handle non-instruction targets
+
     return s
 
 def get_insts(v):

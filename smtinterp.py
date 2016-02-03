@@ -5,6 +5,7 @@ Translate expressions into SMT via Z3
 from language import *
 from typing import TypeConstraints, TySort
 from z3util import *
+import config
 import z3, operator, logging
 
 
@@ -405,25 +406,28 @@ def check_refinement_at(type_model, src, tgt, pre=None):
     sd += [pb] + pd
     # NOTE: should we require sd => pd?
   
-  sd = z3.And(sd)
-  sp = z3.And(sp)
-  td = z3.And(td)
-  tp = z3.And(tp)
   
   s = z3.Solver()
-  s.add(sd, z3.Not(td))
+  s.add(sd)
+  if config.poison_undef:
+    s.add(sp)
+  s.add(z3.Not(z3.And(td)))
   logger.debug('undef check\n%s', s)
   if s.check() != z3.unsat:
     return 'undefined', s.model()
   
   s = z3.Solver()
-  s.add(sd, sp, z3.Not(tp))
+  s.add(sd)
+  s.add(sp)
+  s.add(z3.Not(z3.And(tp)))
   logger.debug('poison check\n%s', s)
   if s.check() != z3.unsat:
     return 'poison', s.model()
   
   s = z3.Solver()
-  s.add(sd, sp, sv != tv)
+  s.add(sd)
+  s.add(sp)
+  s.add(sv != tv)
   logger.debug('equality check\n%s', s)
   if s.check() != z3.unsat:
     return 'unequal', s.model()
