@@ -65,9 +65,18 @@ class Transform(object):
 
     s += '\n'.join(src_lines) + '\n=>\n'
 
+    if isinstance(self.tgt, Instruction):
+      f.ids[self.tgt] = self.src.name
+
     tgti = get_insts(self.tgt)
-    s += '\n'.join(i.accept(f) for i in tgti if i not in f.ids)
-    # FIXME: handle non-instruction targets
+    tgt_lines = [i.accept(f) for i in tgti if i not in f.ids]
+
+    if not isinstance(self.tgt, Instruction):
+      tgt_lines.append(self.src.name + ' = ' + self.tgt.accept(f))
+    else:
+      tgt_lines.append(self.tgt.accept(f))
+
+    s += '\n'.join(tgt_lines)
 
     return s
 
@@ -108,6 +117,7 @@ def subterms(term):
 class Formatter(Visitor):
   def __init__(self):
     self.ids = {}
+    self.names = set()
     self.fresh = 0
 
   def name(self, term):
@@ -121,11 +131,12 @@ class Formatter(Visitor):
       name = prefix + str(self.fresh)
       self.fresh += 1
 
-    while name in self.ids:
+    while name in self.names:
       name = prefix + str(self.fresh)
       self.fresh += 1
 
     self.ids[term] = name
+    self.names.add(name)
     return name
 
   def operand(self, term, ty = None):
@@ -159,13 +170,13 @@ class Formatter(Visitor):
       (' to ' + self.ty(term.src_ty) if term.src_ty else '')
 
   def IcmpInst(self, term):
-    return 'icmp ' + term.pred + ' ' + \
+    return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
       self.operand(term.x, term.ty) + ', ' + self.operand(term.y)
 
   def SelectInst(self, term):
-    return 'select ' + self.operand(term.sel) + ', ' + \
-      self.operand(term.arg1, term.ty1) + ', ' + \
-      self.operand(term.arg2, term.ty2)
+    return self.name(term) + ' = ' + 'select ' + self.operand(term.sel) + \
+      ', ' + self.operand(term.arg1, term.ty1) + \
+      ', ' + self.operand(term.arg2, term.ty2)
 
   def Literal(self, term):
     return str(term.val)
