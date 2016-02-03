@@ -126,6 +126,7 @@ class ZExtInst(ConversionInst):
 class TruncInst(ConversionInst):
   code = 'trunc'
 
+class ZExtOrTruncInst(ConversionInst): code = 'ZExtOrTrunc'
 
 class IcmpInst(Instruction):
   def __init__(self, pred, arg1, arg2, ty = None, name = ''):
@@ -483,6 +484,12 @@ class BaseTypeConstraints(Visitor):
     self.integer(term)
     self.integer(term.arg)
     self.width_ceiling(term, term.arg)
+
+  def ZExtOrTruncInst(self, term):
+    self.integer(term)
+    self.integer(term.arg)
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
 
   def IcmpInst(self, term):
     self.bool(term)

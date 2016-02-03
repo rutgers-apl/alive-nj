@@ -79,5 +79,4 @@ if __name__ == '__main__':
     sys.stderr.write('\n[Keyboard interrupt]\n')
   except Exception, e:
     logging.exception(e)
-    print '\nExiting with exception (see log)'
-    exit(-1)
+    raise

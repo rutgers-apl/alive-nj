@@ -1,4 +1,3 @@
-- ZExtOrTrunc
 - seperate type checking of source and souce+target
 - counterexample reporting
 - undef

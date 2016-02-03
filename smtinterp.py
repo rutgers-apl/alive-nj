@@ -157,6 +157,18 @@ class SMTTranslator(Visitor):
     tgt = self.bits(term)
     return z3.Extract(tgt - 1, 0, v), d, p
 
+  def ZExtOrTruncInst(self, term):
+    v,d,p = self(term.arg)
+    src = self.bits(term.arg)
+    tgt = self.bits(term)
+    
+    if tgt == src:
+      return v,d,p
+    if tgt > src:
+      return z3.ZeroExt(tgt - src, v), d, p
+    
+    return z3.Extract(tgt-1, 0, v), d, p
+
   def IcmpInst(self, term):
     x,dx,px = self(term.x)
     y,dy,py = self(term.y)
