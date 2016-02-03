@@ -7,7 +7,7 @@ import disjoint, logging, collections, z3
 
 logger = logging.getLogger(__name__)
 
-FIRST_CLASS, PTR, INT, BOOL, Last = range(5)
+FIRST_CLASS, FLOAT, INT_PTR, PTR, INT, BOOL, Last = range(7)
 
 class IncompatibleConstraints(Exception):
   pass
@@ -16,7 +16,10 @@ class IncompatibleConstraints(Exception):
 def most_specific(c1,c2):
   if c1 > c2:
     c1,c2 = c2,c1
-  
+
+  if c1 == FLOAT and c2 != FLOAT:
+    raise IncompatibleConstraints
+
   if c1 == PTR and c2 != PTR:
     raise IncompatibleConstraints
   
@@ -25,7 +28,11 @@ def most_specific(c1,c2):
 
 def meets_constraint(con, ty):
   if con == FIRST_CLASS:
-    return isinstance(ty, IntType) # TODO: PtrType
+    return isinstance(ty, (IntType, FloatType)) # TODO: PtrType
+  if con == FLOAT:
+    return isinstance(ty, FloatType)
+  if con == INT_PTR:
+    return isinstance(ty, IntType)
   if con == PTR:
     return False # TODO: PtrType
   if con == INT:
@@ -38,6 +45,9 @@ def meets_constraint(con, ty):
 TySort = z3.Datatype('Ty')
 TySort.declare('integer', ('width', z3.IntSort()))
 TySort.declare('pointer')
+TySort.declare('half')
+TySort.declare('single')
+TySort.declare('double')
 TySort = TySort.create()
 
 
@@ -46,14 +56,37 @@ def translate_ty(ty):
   
   if isinstance(ty, IntType):
     return TySort.integer(ty.width)
-  
+
+  if isinstance(ty, HalfType):
+    return TySort.half
+
+  if isinstance(ty, SingleType):
+    return TySort.single
+
+  if isinstance(ty, DoubleType):
+    return TySort.double
+
   assert False # TODO: raise something here
 
 def z3_constraints(con, var, maxwidth=64, depth=1):
   if con == FIRST_CLASS:
     return z3.Or(
       z3_constraints(PTR, var, maxwidth, depth),
-      z3_constraints(INT, var, maxwidth, depth)
+      z3_constraints(INT, var, maxwidth, depth),
+      z3_constraints(FLOAT, var, maxwidth, depth),
+    )
+
+  if con == FLOAT:
+    return z3.Or(
+      TySort.is_half(var),
+      TySort.is_single(var),
+      TySort.is_double(var),
+    )
+
+  if con == INT_PTR:
+    return z3.Or(
+      z3_constraints(PTR, var, maxwidth, depth),
+      z3_constraints(INT, var, maxwidth, depth),
     )
 
   if con == PTR:
@@ -141,7 +174,10 @@ class TypeConstraints(BaseTypeConstraints):
     self.constrain(term, PTR)
   
   def int_ptr_vec(self, term):
-    self.constrain(term, FIRST_CLASS)
+    self.constrain(term, INT_PTR)
+
+  def float(self, term):
+    self.constrain(term, FLOAT)
 
   def first_class(self, term):
     self.constrain(term, FIRST_CLASS)

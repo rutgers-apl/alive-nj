@@ -19,9 +19,24 @@ class IntType(Type):
   def __eq__(self, other):
     return type(other) is IntType and self.width == other.width
 
-# TODO: class PtrType; class ArrayType
+class FloatType(Type):
+  def __repr__(self):
+    return type(self).__name__ + '()'
 
+  def __eq__(self, other):
+    return type(other) is type(self)
 
+class HalfType(FloatType):
+  exp = 5
+  frac = 11
+
+class SingleType(FloatType):
+  exp = 8
+  frac = 24
+
+class DoubleType(FloatType):
+  exp = 11
+  frac = 53
 
 
 
@@ -86,20 +101,26 @@ class BinaryOperator(Instruction):
   def args(self):
     return (self.x, self.y)
 
-class AddInst(BinaryOperator):  code = 'add'
-class SubInst(BinaryOperator):  code = 'sub'
-class MulInst(BinaryOperator):  code = 'mul'
-class SDivInst(BinaryOperator): code = 'sdiv'
-class UDivInst(BinaryOperator): code = 'udiv'
-class SRemInst(BinaryOperator): code = 'srem'
-class URemInst(BinaryOperator): code = 'urem'
-class ShlInst(BinaryOperator):  code = 'shl'
-class AShrInst(BinaryOperator): code = 'ashr'
-class LShrInst(BinaryOperator): code = 'lshr'
-class AndInst(BinaryOperator):  code = 'and'
-class OrInst(BinaryOperator):   code = 'or'
-class XorInst(BinaryOperator):  code = 'xor'
+class IntBinaryOperator(BinaryOperator): pass
 
+class AddInst(IntBinaryOperator):  code = 'add'
+class SubInst(IntBinaryOperator):  code = 'sub'
+class MulInst(IntBinaryOperator):  code = 'mul'
+class SDivInst(IntBinaryOperator): code = 'sdiv'
+class UDivInst(IntBinaryOperator): code = 'udiv'
+class SRemInst(IntBinaryOperator): code = 'srem'
+class URemInst(IntBinaryOperator): code = 'urem'
+class ShlInst(IntBinaryOperator):  code = 'shl'
+class AShrInst(IntBinaryOperator): code = 'ashr'
+class LShrInst(IntBinaryOperator): code = 'lshr'
+class AndInst(IntBinaryOperator):  code = 'and'
+class OrInst(IntBinaryOperator):   code = 'or'
+class XorInst(IntBinaryOperator):  code = 'xor'
+
+
+class FloatBinaryOperator(BinaryOperator): pass
+
+class FAddInst(FloatBinaryOperator): code = 'fadd'
 
 
 class ConversionInst(Instruction):
@@ -471,10 +492,15 @@ class BaseTypeConstraints(Visitor):
     else:
       self.first_class(term)
 
-  def BinaryOperator(self, term):
+  def IntBinaryOperator(self, term):
     self.specific(term, term.ty)
     self.eq_types(term, term.x, term.y)
     self.integer(term)
+
+  def FloatBinaryOperator(self, term):
+    self.float(term)
+    self.specific(term, term.ty)
+    self.eq_types(term, term.x, term.y)
 
   def SExtInst(self, term):
     self.ZExtInst(term)

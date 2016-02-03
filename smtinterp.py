@@ -125,7 +125,19 @@ class SMTTranslator(Visitor):
 
   def Input(self, term):
     # TODO: unique name check
-    return z3.BitVec(term.name, self.bits(term))
+
+    ty = self.types[term]
+    if ty.decl().eq(TySort.integer) or ty.eq(TySort.pointer):
+      return z3.BitVec(term.name, self.bits(term))
+
+    if ty.eq(TySort.half):
+      return z3.Const(term.name, z3.FloatHalf())
+
+    if ty.eq(TySort.single):
+      return z3.Const(term.name, z3.Float32())
+
+    if ty.eq(TySort.double):
+      return z3.Const(term.name, z3.Float64())
 
   AddInst = _mk_bop(operator.add,
     poisons =
@@ -173,7 +185,8 @@ class SMTTranslator(Visitor):
   AndInst = _mk_bop(operator.and_)
   OrInst = _mk_bop(operator.or_)
   XorInst = _mk_bop(operator.xor)
-    
+
+  FAddInst = _mk_bop(operator.add)
 
 
   def SExtInst(self, term):
@@ -234,9 +247,23 @@ class SMTTranslator(Visitor):
     return z3.BitVecVal(term.val, self.bits(term))
 
   def UndefValue(self, term):
-    x = self.fresh_bv(self.bits(term), prefix='undef_')
-    self.add_qvar(x)
-    return x
+    ty = self.types[term]
+    if ty.decl().eq(TySort.integer) or ty.eq(TySort.pointer):
+      x = self.fresh_bv(self.bits(term), prefix='undef_')
+      self.add_qvar(x)
+      return x
+
+    self.fresh += 1
+    name = 'undef_' + str(self.fresh)
+
+    if ty.eq(TySort.half):
+      return z3.Const(name, z3.FloatHalf())
+
+    if ty.eq(TySort.single):
+      return z3.Const(name, z3.Float32())
+
+    if ty.eq(TySort.double):
+      return z3.Const(name, z3.Float64())
 
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
