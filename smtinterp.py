@@ -3,7 +3,7 @@ Translate expressions into SMT via Z3
 '''
 
 from language import *
-from typing import TypeConstraints, TySort
+from typing import TypeConstraints, TySort, FloatTy
 from z3util import *
 import config
 import z3, operator, logging
@@ -58,6 +58,25 @@ def _mk_bin_must_analysis(op):
 
   return bop
 
+def _ty_sort(aty):
+  'Translate a TySort expression to a Z3 Sort'
+
+  if aty.decl().eq(TySort.integer):
+    return z3.BitVecSort(aty.arg(0).as_long())
+
+  if aty.eq(TySort.pointer):
+    return z3.BitVecSort(64)
+
+  if aty.decl().eq(TySort.float):
+    fty = aty.arg(0)
+    if fty.eq(FloatTy.half):
+      return z3.FloatHalf()
+    if fty.eq(FloatTy.single):
+      return z3.Float32()
+    if fty.eq(FloatTy.double):
+      return z3.Float64()
+
+  assert False
 
 class SMTTranslator(Visitor):
   def __init__(self, type_model):
@@ -127,17 +146,7 @@ class SMTTranslator(Visitor):
     # TODO: unique name check
 
     ty = self.types[term]
-    if ty.decl().eq(TySort.integer) or ty.eq(TySort.pointer):
-      return z3.BitVec(term.name, self.bits(term))
-
-    if ty.eq(TySort.half):
-      return z3.Const(term.name, z3.FloatHalf())
-
-    if ty.eq(TySort.single):
-      return z3.Const(term.name, z3.Float32())
-
-    if ty.eq(TySort.double):
-      return z3.Const(term.name, z3.Float64())
+    return z3.Const(term.name, _ty_sort(ty))
 
   AddInst = _mk_bop(operator.add,
     poisons =
@@ -248,39 +257,19 @@ class SMTTranslator(Visitor):
 
   def FLiteral(self, term):
     ty = self.types[term]
-    for aty,zty in ((TySort.half, z3.FloatHalf), (TySort.single, z3.Float32), (TySort.double, z3.Float64)):
-      if ty.eq(aty):
-        return z3.FPVal(term.val, zty())
+    assert ty.decl().eq(TySort.float)
 
-    assert False
+    return z3.FPVal(term.val, _ty_sort(ty))
 
 
   def UndefValue(self, term):
     ty = self.types[term]
-    if ty.decl().eq(TySort.integer) or ty.eq(TySort.pointer):
-      x = self.fresh_bv(self.bits(term), prefix='undef_')
-      self.add_qvar(x)
-      return x
-
     self.fresh += 1
     name = 'undef_' + str(self.fresh)
 
-    if ty.eq(TySort.half):
-      x = z3.Const(name, z3.FloatHalf())
-      self.add_qvar(x)
-      return x
-
-    if ty.eq(TySort.single):
-      x = z3.Const(name, z3.Float32())
-      self.add_qvar(x)
-      return x
-
-    if ty.eq(TySort.double):
-      x = z3.Const(name, z3.Float64())
-      self.add_qvar(x)
-      return x
-
-    assert False
+    x = z3.Const(name, _ty_sort(ty))
+    self.add_qvar(x)
+    return x
 
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
@@ -509,8 +498,7 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   if s.check() != z3.unsat:
     return 'poison', s.model()
   
-  if type_model[src].eq(TySort.half) or type_model[src].eq(TySort.single) or \
-      type_model[src].eq(TySort.double):
+  if type_model[src].decl().eq(TySort.float):
     expr = sd + sp + [sv != tv, z3.Not(z3.And(z3.fpIsNaN(sv), z3.fpIsNaN(tv)))]
   else:
     expr = sd + sp + [sv != tv]

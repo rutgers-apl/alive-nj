@@ -42,12 +42,16 @@ def meets_constraint(con, ty):
 
   assert False
 
+FloatTy = z3.Datatype('FloatTy')
+FloatTy.declare('half')
+FloatTy.declare('single')
+FloatTy.declare('double')
+FloatTy = FloatTy.create()
+
 TySort = z3.Datatype('Ty')
 TySort.declare('integer', ('width', z3.IntSort()))
 TySort.declare('pointer')
-TySort.declare('half')
-TySort.declare('single')
-TySort.declare('double')
+TySort.declare('float', ('float_ty', FloatTy))
 TySort = TySort.create()
 
 
@@ -58,13 +62,13 @@ def translate_ty(ty):
     return TySort.integer(ty.width)
 
   if isinstance(ty, HalfType):
-    return TySort.half
+    return TySort.float(FloatTy.half)
 
   if isinstance(ty, SingleType):
-    return TySort.single
+    return TySort.float(FloatTy.single)
 
   if isinstance(ty, DoubleType):
-    return TySort.double
+    return TySort.float(FloatTy.double)
 
   assert False # TODO: raise something here
 
@@ -77,11 +81,7 @@ def z3_constraints(con, var, maxwidth=64, depth=1):
     )
 
   if con == FLOAT:
-    return z3.Or(
-      TySort.is_half(var),
-      TySort.is_single(var),
-      TySort.is_double(var),
-    )
+    return TySort.is_float(var)
 
   if con == INT_PTR:
     return z3.Or(
