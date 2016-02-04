@@ -455,7 +455,7 @@ def opCode(codes):
 #   return oneOf(' '.join(codes))('code').setParseAction(traceParseAction(pa)).setDebug()
   return ident('code').setParseAction(pa, callDuringTry=True)
 
-flags = Group(ZeroOrMore(locatedExpr(oneOf('nsw nuw exact'))))
+flags = Group(ZeroOrMore(locatedExpr(oneOf('nsw nuw exact nnan ninf'))))
 
 binOp = (opCode(bin_insts) - flags('flags') - opt_ty('ty') - operand('x') - comma
       - operand('y')).setParseAction(BinOpAst)

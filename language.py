@@ -121,6 +121,10 @@ class XorInst(IntBinaryOperator):  code = 'xor'
 class FloatBinaryOperator(BinaryOperator): pass
 
 class FAddInst(FloatBinaryOperator): code = 'fadd'
+class FSubInst(FloatBinaryOperator): code = 'fsub'
+class FMulInst(FloatBinaryOperator): code = 'fmul'
+class FDivInst(FloatBinaryOperator): code = 'fdiv'
+class FRemInst(FloatBinaryOperator): code = 'frem'
 
 
 class ConversionInst(Instruction):

@@ -31,6 +31,23 @@ def _mk_bop(op, defined = None, poisons = None):
   
   return bop
 
+def _mk_fp_bop(op):
+  def bop(self, term):
+    x = self(term.x)
+    y = self(term.y)
+
+    if 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)), 
+        z3.Not(z3.fpIsNaN(op(x,y))))
+
+    if 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+
+    return op(x,y)
+
+  return bop
+
 def _mk_must_analysis(op):
   def pred(self, term):
     x = self(term._args[0])
@@ -195,7 +212,11 @@ class SMTTranslator(Visitor):
   OrInst = _mk_bop(operator.or_)
   XorInst = _mk_bop(operator.xor)
 
-  FAddInst = _mk_bop(operator.add)
+  FAddInst = _mk_fp_bop(operator.add)
+  FSubInst = _mk_fp_bop(operator.sub)
+  FMulInst = _mk_fp_bop(operator.mul)
+  FDivInst = _mk_fp_bop(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
+  FRemInst = _mk_fp_bop(z3.fpRem)
 
 
   def SExtInst(self, term):
