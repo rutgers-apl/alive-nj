@@ -1,0 +1,45 @@
+Name: double
+%x = mul undef, 2
+%y = trunc %x to i1
+=>
+%y = 0
+
+
+
+Name: add
+%x = add %a, undef
+=>
+%x = undef
+
+
+Name: select-1
+%x = select undef, %a, %b
+=>
+%x = %a
+
+Name: select-2
+%x = select %a, undef, %b
+=>
+%x = %b
+
+
+Name: Xor
+%a = undef
+%b = xor %a, %a
+=>
+%b = undef  ; should be undef, apparently
+
+
+Name: no comparison
+%d = undef
+%a = icmp slt %d, 0
+%b = icmp sge %d, 0
+%c = xor %a, %b
+=>
+%c = undef ; should be undef
+
+
+; Name: undef -> u.b.
+; %x = sdiv %a, undef
+; =>
+; unreachable
