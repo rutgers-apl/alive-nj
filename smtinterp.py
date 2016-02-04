@@ -246,6 +246,15 @@ class SMTTranslator(Visitor):
   def Literal(self, term):
     return z3.BitVecVal(term.val, self.bits(term))
 
+  def FLiteral(self, term):
+    ty = self.types[term]
+    for aty,zty in ((TySort.half, z3.FloatHalf), (TySort.single, z3.Float32), (TySort.double, z3.Float64)):
+      if ty.eq(aty):
+        return z3.FPVal(term.val, zty())
+
+    assert False
+
+
   def UndefValue(self, term):
     ty = self.types[term]
     if ty.decl().eq(TySort.integer) or ty.eq(TySort.pointer):
@@ -257,13 +266,21 @@ class SMTTranslator(Visitor):
     name = 'undef_' + str(self.fresh)
 
     if ty.eq(TySort.half):
-      return z3.Const(name, z3.FloatHalf())
+      x = z3.Const(name, z3.FloatHalf())
+      self.add_qvar(x)
+      return x
 
     if ty.eq(TySort.single):
-      return z3.Const(name, z3.Float32())
+      x = z3.Const(name, z3.Float32())
+      self.add_qvar(x)
+      return x
 
     if ty.eq(TySort.double):
-      return z3.Const(name, z3.Float64())
+      x = z3.Const(name, z3.Float64())
+      self.add_qvar(x)
+      return x
+
+    assert False
 
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
@@ -492,7 +509,12 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   if s.check() != z3.unsat:
     return 'poison', s.model()
   
-  expr = sd + sp + [sv != tv]
+  if type_model[src].eq(TySort.half) or type_model[src].eq(TySort.single) or \
+      type_model[src].eq(TySort.double):
+    expr = sd + sp + [sv != tv, z3.Not(z3.And(z3.fpIsNaN(sv), z3.fpIsNaN(tv)))]
+  else:
+    expr = sd + sp + [sv != tv]
+
   if qvars:
     expr = z3.ForAll(qvars, z3.And(expr))
   

@@ -156,6 +156,9 @@ class Formatter(Visitor):
 
     assert False
 
+  def Node(self, term):
+    return '<>'
+
   def Input(self, term):
     return self.name(term)
 
@@ -179,6 +182,9 @@ class Formatter(Visitor):
       ', ' + self.operand(term.arg2, term.ty2)
 
   def Literal(self, term):
+    return str(term.val)
+
+  def FLiteral(self, term):
     return str(term.val)
 
   def UndefValue(self, term):

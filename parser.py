@@ -54,7 +54,10 @@ class ValAst(Ast):
 class LiteralAst(ValAst):
   def value(self, ty, ids, phase):
     # NOTE: do anything with the type?
-    return L.Literal(int(self.toks[0]))
+    tok = self.toks[0]
+    if '.' in tok:
+      return L.FLiteral(float(tok))
+    return L.Literal(int(tok))
 
 class LitWordAst(ValAst):
   def value(self, ty, ids, phase):
@@ -380,7 +383,7 @@ ty = ('i' + posnum).setName('type').setParseAction(IntTypeAst)
 opt_ty = Optional(ty).setParseAction(OptionalTypeAst)
 
 
-lit = Regex("(?:-\s*)?\d+").setName("Literal").setParseAction(LiteralAst)
+lit = Regex("-?\d+(?:.\d+)?").setName("Literal").setParseAction(LiteralAst)
 
 ident = Word(srange("[a-zA-Z]"), srange(r"[a-zA-Z0-9_.]")).setName("Identifier")
 

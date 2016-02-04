@@ -195,6 +195,16 @@ class Literal(Constant):
   def args(self):
     return ()
 
+class FLiteral(Constant):
+  def __init__(self, val):
+    self.val = val
+
+  def __repr__(self):
+    return 'FLiteral(' + repr(self.val) + ')'
+
+  def args(self):
+    return ()
+
 class UndefValue(Constant):
   # not sure this is a constant, rather than an arbitrary value
   def __init__(self, ty = None):
@@ -544,6 +554,10 @@ class BaseTypeConstraints(Visitor):
     x = term.val
     bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
     self.width_ceiling(x-1, term)  # -1 because the ceiling is a hard limit
+
+  def FLiteral(self, term):
+    self.float(term)
+    # TODO: set minimum float size?
 
   def UndefValue(self, term):
     self.first_class(term)
