@@ -172,8 +172,8 @@ class Formatter(Visitor):
 
   def ConversionInst(self, term):
     return self.name(term) + ' = ' + term.code + ' ' + \
-      self.operand(term.arg, term.ty) + \
-      (' to ' + self.ty(term.src_ty) if term.src_ty else '')
+      self.operand(term.arg, term.src_ty) + \
+      (' to ' + self.ty(term.ty) if term.ty else '')
 
   def IcmpInst(self, term):
     return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
