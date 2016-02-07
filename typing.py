@@ -3,7 +3,7 @@ Apply typing constraints to the IR.
 '''
 
 from language import *
-import disjoint, logging, collections, z3
+import disjoint, logging, collections, z3, pretty
 
 logger = logging.getLogger(__name__)
 
@@ -163,10 +163,17 @@ class TypeConstraints(BaseTypeConstraints):
         raise IncompatibleConstraints
 
   def simplify_orderings(self):
-    logger.debug('simplifying ordering: %s', self.ordering)
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('simplifying ordering:\n  ' + 
+        pretty.pformat(self.ordering, indent=2))
+
     ords = { (lo if isinstance(lo, int) else self.sets.rep(lo), self.sets.rep(hi))
               for (lo,hi) in self.ordering }
-    logger.debug('simplifed ordering: %s', ords)
+
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('simplified ordering:\n  ' + 
+        pretty.pformat(ords, indent=2))
+
     self.ordering = ords
 
 
@@ -198,9 +205,10 @@ class TypeConstraints(BaseTypeConstraints):
   def z3_models(self, maxwidth=64, depth=0):
     s, vars = self.z3_solver(maxwidth, depth)
     
-    logger.debug('solver %s', s)
-    logger.debug('vars %s', vars)
-    
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('solver\n%s', s)
+      logger.debug('vars\n  %s', pretty.pformat(vars, indent=2))
+
     if s.check() != z3.sat:
       raise IncompatibleConstraints
 
@@ -216,39 +224,3 @@ class TypeConstraints(BaseTypeConstraints):
       s.add(z3.Or([v != model[v] for v in nonfixed]))
       
       logger.debug('solver %s', s)
-
-
-if __name__ == '__main__':
-  logging.basicConfig(level=logging.DEBUG)
-  
-#   x = Input('x')
-#   y = AddInst(Input('w'), SExtInst(x), IntType(8))
-#   z = IcmpInst('sle',x,y)
-
-  x = Input('x')
-  y = Input('y')
-  z = AddInst(SExtInst(x), SExtInst(y), IntType(8))
-  w = SExtInst(AddInst(x,y))
-  
-  T = TypeConstraints()
-  T(z)
-
-#   from pprint import pprint
-#   pprint(T.constraints)
-#   pprint(T.specifics)
-# 
-#   for m in T.z3_models():
-#     print
-#     pprint(m)
-#     break
-  
-  T(w)
-  T.eq_types(w,z)
-
-  from pprint import pprint
-  pprint(T.constraints)
-  pprint(T.specifics)
-
-  for m in T.z3_models():
-    print
-    pprint(m)

@@ -2,6 +2,8 @@
 Defines the internal representation as nodes in a DAG.
 '''
 
+import pretty
+
 
 # Type system
 # -----------
@@ -30,6 +32,13 @@ class IntType(Type):
 
 class MetaNode(type):
   'Automatically generate a superclass table for Node classes'
+
+  def __new__(cls, name, bases, dict):
+    if '__slots__' not in dict and hasattr(bases[0], '__slots__'):
+      dict['__slots__'] = bases[0].__slots__
+
+    return super(MetaNode, cls).__new__(cls, name, bases, dict)
+
   def __init__(cls, name, bases, dict):
     if not hasattr(cls, 'registry'):
       cls.registry = {}
@@ -44,25 +53,46 @@ class MetaNode(type):
 
 class Node(object):
   __metaclass__ = MetaNode
-
-#   def __repr__(self):
-#     return type(self).__name__ + '()'
+  __slots__ = ()
   
   def accept(self, visitor, *args, **kws):
     return getattr(visitor, type(self).__name__)(self, *args, **kws)
     # makes the stack trace slightly ugly, but saves a bunch of typing
+
+  def pretty(self):
+    return pretty.group(type(self).__name__, '(', pretty.lbreak,
+      (',' + pretty.line).join(pretty.prepr(getattr(self,s)) for s in self.__slots__),
+      ')').nest(2)
+
+  def __repr__(self):
+    return self.pretty().oneline()
+
+# NOTE: these are desirable, but shouldn't be activated until typing
+# and smtinterp are thought through. In particular, two instances of
+# "log2(C)" may not have the same type, so they shouldn't be conflated
+# during type checking.
+#
+#   def __eq__(self, other):
+#     return type(self) is type(other) and \
+#       all(getattr(self,s) == getattr(other,s) for s in self.__slots__)
+# 
+#   def __hash__(self):
+#     key = tuple(getattr(self,s) for s in self.__slots__)
+#     h = hash(type(self)) ^ hash(key)
+#     return h
+
+  def args(self):
+    return tuple(getattr(self,s) for s in self.__slots__)
+
 
 class Value(Node):
   pass
 
 
 class Input(Value):
+  __slots__ = ('name',)
   def __init__(self, name):
     self.name = name
-    self.type = None
-  
-  def __repr__(self):
-    return 'Input({0.name!r})'.format(self)
   
   def args(self):
     return ()
@@ -71,6 +101,7 @@ class Instruction(Value):
   pass
 
 class BinaryOperator(Instruction):
+  __slots__ = ('x','y','ty','flags','name')
   codes = {}
 
   def __init__(self, x, y, ty = None, flags = (), name=''):
@@ -79,9 +110,6 @@ class BinaryOperator(Instruction):
     self.y = y
     self.flags = tuple(flags)
     self.name = name
-  
-  def __repr__(self):
-    return '{0.__name__}({1.x!r}, {1.y!r}, {1.ty!r}, {1.flags!r})'.format(type(self), self)
 
   def args(self):
     return (self.x, self.y)
@@ -103,6 +131,7 @@ class XorInst(BinaryOperator):  code = 'xor'
 
 
 class ConversionInst(Instruction):
+  __slots__ = ('arg', 'src_ty', 'ty', 'name')
   codes = {}
 
   def __init__(self, arg, src_ty = None, dest_ty = None, name = ''):
@@ -110,9 +139,6 @@ class ConversionInst(Instruction):
     self.arg = arg
     self.ty = dest_ty
     self.name = name
-
-  def __repr__(self):
-    return '{0.__name__}({1.arg!r}, {1.src_ty!r}, {1.ty!r})'.format(type(self), self)
 
   def args(self):
     return (self.arg,)
@@ -129,6 +155,8 @@ class TruncInst(ConversionInst):
 class ZExtOrTruncInst(ConversionInst): code = 'ZExtOrTrunc'
 
 class IcmpInst(Instruction):
+  __slots__ = ('pred', 'x', 'y', 'ty', 'name')
+
   def __init__(self, pred, arg1, arg2, ty = None, name = ''):
     self.pred = pred # FIXME: handle comparison ops better somehow?
     self.ty   = ty
@@ -136,13 +164,12 @@ class IcmpInst(Instruction):
     self.y    = arg2
     self.name = name
 
-  def __repr__(self):
-    return 'IcmpInst({0.pred!r}, {0.x!r}, {0.y!r}, {0.ty!r})'.format(self)
-
   def args(self):
     return (self.x, self.y)
 
 class SelectInst(Instruction):
+  __slots__ = ('sel', 'arg1', 'arg2', 'ty1', 'ty2', 'name')
+
   def __init__(self, sel, arg1, arg2, ty1 = None, ty2 = None, name = ''):
     self.sel  = sel
     self.ty1  = ty1
@@ -150,9 +177,6 @@ class SelectInst(Instruction):
     self.ty2  = ty2
     self.arg2 = arg2
     self.name = name
-
-  def __repr__(self):
-    return 'SelectInst({0.sel!r}, {0.arg1!r}, {0.arg2!r}, {0.ty1!r}, {0.ty2!r})'.format(self)
 
   def args(self):
     return (self.sel, self.arg1, self.arg2)
@@ -164,18 +188,19 @@ class Constant(Value):
   pass
 
 class Literal(Constant):
+  __slots__ = ('val',)
+
   def __init__(self, val):
     self.val = val
 # TODO: need type for null?
-
-  def __repr__(self):
-    return 'Literal({0!r})'.format(self.val)
 
   def args(self):
     return ()
 
 class UndefValue(Constant):
   # not sure this is a constant, rather than an arbitrary value
+  __slots__ = ('ty',)
+
   def __init__(self, ty = None):
     self.ty = ty
 
@@ -183,17 +208,12 @@ class UndefValue(Constant):
     return ()
 
 class BinaryCnxp(Constant):
+  __slots__ = ('x','y')
   codes = {}
 
   def __init__(self, x, y):
     self.x = x
     self.y = y
-
-  def __repr__(self):
-    return '{0.__name__}({1.x!r}, {1.y!r})'.format(type(self), self)
-
-  def args(self):
-    return (self.x, self.y)
 
 class AddCnxp(BinaryCnxp):  code = '+'
 class SubCnxp(BinaryCnxp):  code = '-'
@@ -212,30 +232,28 @@ class XorCnxp(BinaryCnxp):  code = '^'
 
 # NOTE: do we need these?
 class UnaryCnxp(Constant):
+  __slots__ = ('x',)
   codes = {}
 
   def __init__(self, x):
     self.x = x
-
-  def __repr__(self):
-    return '{0.__name__}({1.x!r})'.format(type(self), self)
-
-  def args(self):
-    return (self.x,)
 
 class NegCnxp(UnaryCnxp): code = '-'
 class NotCnxp(UnaryCnxp): code = '~'
 
 
 class FunCnxp(Constant):
+  __slots__ = ('_args',)
   codes = {}
 
   def __init__(self, *args):
     self._args = args
     assert len(args) == self.arity
-  
-  def __repr__(self):
-    return type(self).__name__ + '(' + ', '.join(repr(a) for a in self._args) + ')'
+
+  def pretty(self):
+    return pretty.group(type(self).__name__, '(', pretty.lbreak,
+      (',' + pretty.line).join(pretty.prepr(a) for a in self._args),
+      ')').nest(2)
 
   def args(self):
     return self._args
@@ -303,11 +321,15 @@ class Predicate(Node):
   pass
 
 class AndPred(Predicate):
+  __slots__ = ('clauses',)
+
   def __init__(self, *clauses):
     self.clauses = clauses
 
-  def __repr__(self):
-    return 'AndPred(' + ', '.join(repr(a) for a in self.clauses) + ')'
+  def pretty(self):
+    return pretty.group('AndPred(', pretty.lbreak,
+      (',' + pretty.line).join(pretty.prepr(a) for a in self.clauses),
+      ')').nest(2)
 
   def args(self):
     return self.clauses
@@ -315,47 +337,52 @@ class AndPred(Predicate):
 TruePred = AndPred()
 
 class OrPred(Predicate):
+  __slots__ = ('clauses',)
+
   def __init__(self, *clauses):
     self.clauses = clauses
 
-  def __repr__(self):
-    return 'OrPred(' + ', '.join(repr(a) for a in self.clauses) + ')'
+  def pretty(self):
+    return pretty.group('OrPred(', pretty.lbreak,
+      (',' + pretty.line).join(pretty.prepr(a) for a in self.clauses),
+      ')').nest(2)
 
   def args(self):
     return self.clauses
 
 class NotPred(Predicate):
+  __slots__ = ('p',)
+
   def __init__(self, p):
     self.p = p
-
-  def __repr__(self):
-    return 'NotPred(' + repr(self.p) + ')'
 
   def args(self):
     return (self.p,)
 
 class Comparison(Predicate):
+  __slots__ = ('op','x','y')
+
   def __init__(self, op, x, y):
     self.op = op
     self.x  = x
     self.y  = y
 # Better ops as subclasses?
 
-  def __repr__(self):
-    return 'Comparison({0.op!r}, {0.x!r}, {0.y!r})'.format(self)
-
   def args(self):
     return (self.x, self.y)
 
 class FunPred(Predicate):
+  __slots__ = ('_args',)
   codes = {}
 
   def __init__(self, *args):
     self._args = args
     assert len(args) == self.arity
 
-  def __repr__(self):
-    return type(self).__name__ + '(' + ', '.join(repr(a) for a in self._args) + ')'
+  def pretty(self):
+    return pretty.group(type(self).__name__, '(', pretty.lbreak,
+      (',' + pretty.line).join(pretty.prepr(a) for a in self._args),
+      ')').nest(2)
 
   def args(self):
     return self._args
