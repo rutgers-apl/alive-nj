@@ -17,8 +17,8 @@ def is_const(term):
 
 def _mk_bop(op, defined = None, poisons = None):
   def bop(self, term):
-    x = self(term.x)
-    y = self(term.y)
+    x = self.eval(term.x)
+    y = self.eval(term.y)
 
     if defined:
       self.add_defs(*defined(x,y))
@@ -33,7 +33,7 @@ def _mk_bop(op, defined = None, poisons = None):
 
 def _mk_must_analysis(op):
   def pred(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     if is_const(x):
       return op(x)
@@ -46,8 +46,8 @@ def _mk_must_analysis(op):
 
 def _mk_bin_must_analysis(op):
   def bop(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     if all(is_const(a) for a in term._args):
       return op(x,y)
@@ -60,41 +60,40 @@ def _mk_bin_must_analysis(op):
 
 
 class SMTTranslator(Visitor):
+  log = logger.getChild('SMTTranslator')
+
   def __init__(self, type_model):
     self.types = type_model
-    self.terms = {}  # term -> SMT eval * defined * nonpoison
     self.fresh = 0
     self.defs = []  # current defined-ness conditions
     self.nops = []  # current non-poison conditions
     self.qvars = []
 
-  def __call__(self, term):
-    if term not in self.terms:
-      self.eval(term)
-
-    v,d,p = self.terms[term]
-    self.defs += d
-    self.nops += p
-
-    return v
-
   def eval(self, term):
-    # save defs and nops
-    defs = self.defs
-    nops = self.nops
+    '''smt.eval(term) -> Z3 expression
+
+    Translate the term (and subterms), adding its definedness conditons,
+    nonpoison conditions, and quantifier variables to the state.
+    '''
+    self.log.debug('eval %s', term)
+    return term.accept(self)
+
+  def __call__(self, term):
+    '''smt(term) -> Z3 expression, def conds, nonpoison conds, qvars
+
+    Clear the current state, translate the term (and subterms), and
+    return the translation, definedness conditions, nonpoison conditions,
+    and quantified variables.
+
+    Quantified variables are guaranteed to be unique between different
+    calls to the same SMTTranslator object.
+    '''
+    self.log.debug('call %s', term)
     self.defs = []
     self.nops = []
-
-    # evaluate term in new context
+    self.qvars = []
     v = term.accept(self)
-    r = (v, self.defs, self.nops)
-    self.terms[term] = r
-
-    # restore defs and nops
-    self.defs = defs
-    self.nops = nops
-
-    return r
+    return v, self.defs, self.nops, self.qvars
 
   def add_defs(self, *defs):
     self.defs += defs
@@ -177,24 +176,24 @@ class SMTTranslator(Visitor):
 
 
   def SExtInst(self, term):
-    v = self(term.arg)
+    v = self.eval(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
     return z3.SignExt(tgt - src, v)
 
   def ZExtInst(self, term):
-    v = self(term.arg)
+    v = self.eval(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
     return z3.ZeroExt(tgt - src, v)
 
   def TruncInst(self, term):
-    v = self(term.arg)
+    v = self.eval(term.arg)
     tgt = self.bits(term)
     return z3.Extract(tgt - 1, 0, v)
 
   def ZExtOrTruncInst(self, term):
-    v = self(term.arg)
+    v = self.eval(term.arg)
     src = self.bits(term.arg)
     tgt = self.bits(term)
     
@@ -206,8 +205,8 @@ class SMTTranslator(Visitor):
     return z3.Extract(tgt-1, 0, v)
 
   def IcmpInst(self, term):
-    x = self(term.x)
-    y = self(term.y)
+    x = self.eval(term.x)
+    y = self.eval(term.y)
 
     cmp = {
       'eq': operator.eq,
@@ -224,9 +223,9 @@ class SMTTranslator(Visitor):
     return bool_to_BitVec(cmp)
   
   def SelectInst(self, term):
-    c = self(term.sel)
-    x = self(term.arg1)
-    y = self(term.arg2)
+    c = self.eval(term.sel)
+    x = self.eval(term.arg1)
+    y = self.eval(term.arg2)
     
     return z3.If(c == 1, x, y)
 
@@ -255,18 +254,18 @@ class SMTTranslator(Visitor):
   XorCnxp = _mk_bop(operator.xor)
 
   def NotCnxp(self, term):
-    return ~self(term.x)
+    return ~self.eval(term.x)
 
   def NegCnxp(self, term):
-    return -self(term.x)
+    return -self.eval(term.x)
 
   def AbsCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     return z3.If(x >= 0, x, -x)
 
   def SignBitsCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
     size = self.bits(term)
 
     #b = ComputeNumSignBits(self.fresh_bv(size), size)
@@ -277,7 +276,7 @@ class SMTTranslator(Visitor):
     return b
 
   def OneBitsCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
     b = self.fresh_bv(x.size())
     
     self.add_defs(b & ~x == 0)
@@ -285,7 +284,7 @@ class SMTTranslator(Visitor):
     return b
 
   def ZeroBitsCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
     b = self.fresh_bv(x.size())
     
     self.add_defs(b & x == 0)
@@ -293,52 +292,52 @@ class SMTTranslator(Visitor):
     return b
 
   def LeadingZerosCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     return ctlz(x, self.bits(term))
 
   def TrailingZerosCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
     
     return cttz(x, self.bits(term))
 
   def Log2Cnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     return bv_log2(x, self.bits(term))
 
   def LShrFunCnxp(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     return z3.LShR(x,y)
 
   def SMaxCnxp(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     return z3.If(x > y, x, y)
 
   def UMaxCnxp(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     return z3.If(z3.UGT(x,y), x, y)
 
   def SExtCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     bits = self.bits(term)
     return z3.SignExt(bits - x.size(), x)
 
   def ZExtCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     bits = self.bits(term)
     return z3.ZeroExt(bits - x.size(), x)
 
   def TruncCnxp(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     bits = self.bits(term)
     return z3.Extract(bits-1, 0, x)
@@ -348,13 +347,13 @@ class SMTTranslator(Visitor):
     # NOTE: nothing bad should happen if we don't evaluate the argument
 
   def AndPred(self, term):
-    return z3.And([self(cl) for cl in term.clauses])
+    return z3.And([self.eval(cl) for cl in term.clauses])
 
   def OrPred(self, term):
-    return z3.Or([self(cl) for cl in term.clauses])
+    return z3.Or([self.eval(cl) for cl in term.clauses])
 
   def NotPred(self, term):
-    return z3.Not(self(term.p))
+    return z3.Not(self.eval(term.p))
 
   def Comparison(self, term):
     cmp = {
@@ -369,10 +368,10 @@ class SMTTranslator(Visitor):
       'slt': operator.lt,
       'sle': operator.le}[term.op]
 
-    return cmp(self(term.x), self(term.y))
+    return cmp(self.eval(term.x), self.eval(term.y))
 
   def IntMinPred(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     return x == 1 << (x.size()-1)
 
@@ -380,7 +379,7 @@ class SMTTranslator(Visitor):
   Power2OrZPred = _mk_must_analysis(lambda x: x & (x-1) == 0)
 
   def ShiftedMaskPred(self, term):
-    x = self(term._args[0])
+    x = self.eval(term._args[0])
 
     v = (x - 1) | x
     return z3.And(v != 0, ((v+1) & v) == 0)
@@ -400,22 +399,22 @@ class SMTTranslator(Visitor):
     lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
 
   def NSWMulPred(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     size = x.size()
     return z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
 
   def NUWMulPred(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     size = x.size()
     return z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
 
   def NUWShlPred(self, term):
-    x = self(term._args[0])
-    y = self(term._args[1])
+    x = self.eval(term._args[0])
+    y = self.eval(term._args[1])
 
     return z3.LShR(x << y, y) == x
 
@@ -429,13 +428,11 @@ class SMTTranslator(Visitor):
 def check_refinement_at(type_model, src, tgt, pre=None):
   smt = SMTTranslator(type_model)
   
-  sv,sd,sp = smt.eval(src)
-  qvars = smt.qvars
-  smt.qvars = []
+  sv,sd,sp,qvars = smt(src)
 
-  tv,td,tp = smt.eval(tgt)
+  tv,td,tp,_ = smt(tgt)
   if pre:
-    pb,pd,_ = smt.eval(pre)
+    pb,pd,_,_ = smt(pre)
     sd += [pb] + pd
     # NOTE: should we require sd => pd?
 
@@ -481,7 +478,8 @@ def check_refinement_at(type_model, src, tgt, pre=None):
 def check_refinement(e1, e2, pre=None):
   T = TypeConstraints()
   T.eq_types(e1,e2)
-  pre.accept(T)
+  if pre:
+    pre.accept(T)
   
   for m in T.z3_models():
     logger.debug('using model %s', m)
