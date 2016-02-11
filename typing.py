@@ -3,7 +3,7 @@ Apply typing constraints to the IR.
 '''
 
 from language import *
-import disjoint, logging, collections, z3
+import disjoint, logging, collections, z3, pretty
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,29 @@ def translate_ty(ty):
   if isinstance(ty, DoubleType):
     return TySort.float(FloatTy.double)
 
+  if isinstance(ty, PtrType):
+    return TySort.pointer
+  
   assert False # TODO: raise something here
+
+def ty_from_z3(z3_ty):
+  'Translate a Z3 TySort into an Alive Type'
+
+  if z3_ty.decl().eq(TySort.integer):
+    return IntType(z3_ty.arg(0).as_long())
+
+  if z3_ty.decl().eq(TySort.float):
+    fty = z3_ty.arg(0)
+    if fty.eq(FloatTy.half):
+      return HalfType()
+    if fty.eq(FloatTy.single):
+      return SingleType()
+    if fty.eq(FloatTy.double):
+      return DoubleType()
+
+  if z3_ty.eq(TySort.pointer):
+    return PtrType()
+  assert False
 
 def z3_constraints(con, var, maxwidth=64, depth=1):
   if con == FIRST_CLASS:
@@ -199,10 +221,17 @@ class TypeConstraints(BaseTypeConstraints):
         raise IncompatibleConstraints
 
   def simplify_orderings(self):
-    logger.debug('simplifying ordering: %s', self.ordering)
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('simplifying ordering:\n  ' + 
+        pretty.pformat(self.ordering, indent=2))
+
     ords = { (lo if isinstance(lo, int) else self.sets.rep(lo), self.sets.rep(hi))
               for (lo,hi) in self.ordering }
-    logger.debug('simplifed ordering: %s', ords)
+
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('simplified ordering:\n  ' + 
+        pretty.pformat(ords, indent=2))
+
     self.ordering = ords
 
 
@@ -234,9 +263,10 @@ class TypeConstraints(BaseTypeConstraints):
   def z3_models(self, maxwidth=64, depth=0):
     s, vars = self.z3_solver(maxwidth, depth)
     
-    logger.debug('solver %s', s)
-    logger.debug('vars %s', vars)
-    
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('solver\n%s', s)
+      logger.debug('vars\n  %s', pretty.pformat(vars, indent=2))
+
     if s.check() != z3.sat:
       raise IncompatibleConstraints
 
@@ -247,44 +277,23 @@ class TypeConstraints(BaseTypeConstraints):
     while s.check() == z3.sat:
       model = s.model()
       logger.debug('solution\n%s', model)
-      yield { k: model[vars[r]] for k,r in self.sets.key_reps() }
-      
+
+      ty_model = { r: ty_from_z3(model[v]) for (r,v) in vars.iteritems() }
+      yield TypeModel(self.sets, ty_model)
+
       s.add(z3.Or([v != model[v] for v in nonfixed]))
-      
       logger.debug('solver %s', s)
 
+    logger.debug('No solution')
 
-if __name__ == '__main__':
-  logging.basicConfig(level=logging.DEBUG)
-  
-#   x = Input('x')
-#   y = AddInst(Input('w'), SExtInst(x), IntType(8))
-#   z = IcmpInst('sle',x,y)
 
-  x = Input('x')
-  y = Input('y')
-  z = AddInst(SExtInst(x), SExtInst(y), IntType(8))
-  w = SExtInst(AddInst(x,y))
-  
-  T = TypeConstraints()
-  T(z)
+class TypeModel(object):
+  '''Map terms to types.
+  '''
 
-#   from pprint import pprint
-#   pprint(T.constraints)
-#   pprint(T.specifics)
-# 
-#   for m in T.z3_models():
-#     print
-#     pprint(m)
-#     break
-  
-  T(w)
-  T.eq_types(w,z)
+  def __init__(self, sets, model):
+    self.sets = sets
+    self.model = model
 
-  from pprint import pprint
-  pprint(T.constraints)
-  pprint(T.specifics)
-
-  for m in T.z3_models():
-    print
-    pprint(m)
+  def __getitem__(self, key):
+    return self.model[self.sets.rep(key)]

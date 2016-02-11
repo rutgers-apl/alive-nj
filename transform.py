@@ -5,7 +5,7 @@ General object representing transformations (optimizations).
 from language import *
 from typing import TypeConstraints
 from smtinterp import check_refinement_at
-import logging
+import logging, pretty
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,13 @@ class Transform(object):
     self.pre = pre
     self.src = src
     self.tgt = tgt
+
+  def pretty(self):
+    return pretty.group(type(self).__name__, '(', pretty.lbreak,
+      pretty.prepr(self.src), ',', pretty.line,
+      pretty.prepr(self.tgt), ',', pretty.line,
+      pretty.prepr(self.pre), ',', pretty.line,
+      pretty.prepr(self.name), ')').nest(2)
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)
@@ -56,9 +63,8 @@ class Transform(object):
     src_lines = [i.accept(f) for i in srci]
     
     if logger.isEnabledFor(logging.DEBUG):
-      from pprint import pformat
-      logger.debug('Generated source\n%s\n%s',
-        '\n'.join(src_lines), pformat(f.ids))
+      logger.debug('Generated source\n%s\n  %s',
+        '\n'.join(src_lines), pretty.pformat(f.ids, indent=2))
 
     if self.pre:
       s += 'Pre: ' + self.pre.accept(f) + '\n'
@@ -169,8 +175,8 @@ class Formatter(Visitor):
 
   def ConversionInst(self, term):
     return self.name(term) + ' = ' + term.code + ' ' + \
-      self.operand(term.arg, term.ty) + \
-      (' to ' + self.ty(term.src_ty) if term.src_ty else '')
+      self.operand(term.arg, term.src_ty) + \
+      (' to ' + self.ty(term.ty) if term.ty else '')
 
   def IcmpInst(self, term):
     return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
