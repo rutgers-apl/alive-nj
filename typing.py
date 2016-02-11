@@ -28,13 +28,13 @@ def most_specific(c1,c2):
 
 def meets_constraint(con, ty):
   if con == FIRST_CLASS:
-    return isinstance(ty, (IntType, FloatType)) # TODO: PtrType
+    return isinstance(ty, (IntType, FloatType, PtrType))
   if con == FLOAT:
     return isinstance(ty, FloatType)
   if con == INT_PTR:
-    return isinstance(ty, IntType)
+    return isinstance(ty, (IntType, PtrType))
   if con == PTR:
-    return False # TODO: PtrType
+    return isinstance(ty, PtrType)
   if con == INT:
     return isinstance(ty, IntType)
   if con == BOOL:
