@@ -10,6 +10,8 @@ import pretty
 
 class Type(object):
   __slots__ = ()
+  def __ne__(self, other):
+    return not (self == other)
 
 class IntType(Type):
   __slots__ = ('width',)
