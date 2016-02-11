@@ -242,6 +242,7 @@ class Literal(Constant):
     return ()
 
 class FLiteral(Constant):
+  __slots__ = ('val',)
   def __init__(self, val):
     self.val = val
 
@@ -493,6 +494,24 @@ class OneUsePred(FunPred):
   arity = 1
   code  = 'hasOneUse'
 
+# Utilities
+# ---------
+
+def subterms(term):
+  'Generate all subterms of the provided term'
+
+  queue = [term]
+  seen = set()
+
+  while queue:
+    t = queue.pop()
+    if t in seen: continue
+    yield t
+
+    seen.add(t)
+    args = t.args()
+    queue.extend(args)
+
 
 # Visitor
 # -------
@@ -500,13 +519,6 @@ class OneUsePred(FunPred):
 class UnmatchedCase(Exception):
   pass
 
-
-def _int_monad(self, term):
-  self.integer(term._args[0])
-
-def _int_pred(self, term):
-  self.integer(term._args[0])
-  self.eq_types(*term._args)
 
 class MetaVisitor(type):
   '''Fill out the visiting functions which aren't explicitly defined by a
@@ -543,8 +555,18 @@ class Visitor(object):
   def Node(self, term, *args, **kws):
     raise UnmatchedCase('Visitor {0!r} cannot handle class {1!r}'.format(
       type(self).__name__, type(term).__name__))
-  
-  
+
+
+# Type constraints
+# ----------------
+
+def _int_monad(self, term):
+  self.integer(term._args[0])
+
+def _int_pred(self, term):
+  self.integer(term._args[0])
+  self.eq_types(*term._args)
+
 class BaseTypeConstraints(Visitor):
   def Input(self, term):
     if term.name[0] == 'C':

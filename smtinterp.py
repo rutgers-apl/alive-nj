@@ -33,8 +33,8 @@ def _mk_bop(op, defined = None, poisons = None):
 
 def _mk_fp_bop(op):
   def bop(self, term):
-    x = self(term.x)
-    y = self(term.y)
+    x = self.eval(term.x)
+    y = self.eval(term.y)
 
     if 'nnan' in term.flags:
       self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)), 
@@ -469,8 +469,74 @@ class SMTTranslator(Visitor):
     return z3.BoolVal(True)
     # NOTE: should this have semantics?
 
+#FIXME: this belongs somewhere higher in the heirarchy
+def format_ty(ty):
+  if isinstance(ty, IntType):
+    return 'i' + str(ty.width)
 
+  return {
+    PtrType: 'pointer',
+    HalfType: 'half',
+    SingleType: 'float',
+    DoubleType: 'double'}[type(ty)]
 
+def format_z3val(val):
+  #if isinstance(ty, (IntType, PtrType)):
+  if isinstance(val, z3.BitVecNumRef):
+    w = val.size()
+    u = val.as_long()
+    s = val.as_signed_long()
+
+    if u == s:
+      return '0x{1:0{0}X} ({1})'.format((w+3)/4, u)
+    return '0x{1:0{0}X} ({1}, {2})'.format((w+3)/4, u, s)
+
+  #if isinstance(ty, FloatType):
+  if isinstance(val, z3.FPRef):
+    return str(val) #val.as_string()
+
+class RefinementError(object): # exception?
+  UB, POISON, UNEQUAL = range(3)
+
+  def __init__(self, cause, model, types, src, srcv, tgtv, ids):
+    self.cause = cause
+    self.model = model
+    self.types = types
+    self.src   = src
+    self.srcv  = srcv
+    self.tgtv  = tgtv
+    self.ids   = ids
+
+  cause_str = {
+    UB:      'Target introduces undefined behavior',
+    POISON:  'Target introduces poison',
+    UNEQUAL: 'Mismatch in values',
+    }
+
+  def write(self):
+    print 'ERROR:', self.cause_str[self.cause],
+    print 'for', format_ty(self.types[self.src]), self.src.name
+
+    for k,v in self.ids:
+      print k.name, '=', format_ty(self.types[k]),
+      print format_z3val(self.model.evaluate(v, True))
+
+    src_v = self.model.evaluate(self.srcv, True)
+    print
+    print 'source:', format_z3val(src_v)
+
+    if self.cause == self.UB:
+      print 'target: undefined'
+    elif self.cause == self.POISON:
+      print 'target: poison'
+    else:
+      tgt_v = self.model.evaluate(self.tgtv, True)
+      print 'target:', format_z3val(tgt_v)
+
+def _get_inputs(term):
+  for t in subterms(term):
+    if isinstance(t, Input):
+      yield t
 
 def check_refinement_at(type_model, src, tgt, pre=None):
   smt = SMTTranslator(type_model)
@@ -497,7 +563,11 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   s.add(expr)
   logger.debug('undef check\n%s', s)
   if s.check() != z3.unsat:
-    return 'undefined', s.model()
+    m = s.model()
+    logger.debug('counterexample: %s', m)
+    ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
+    return RefinementError(RefinementError.UB,
+      m, type_model, src, sv, tv, ids)
   
   expr = sd + sp + [z3.Not(z3.And(tp))]
   if qvars:
@@ -507,7 +577,11 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   s.add(expr)
   logger.debug('poison check\n%s', s)
   if s.check() != z3.unsat:
-    return 'poison', s.model()
+    m = s.model()
+    logger.debug('counterexample: %s', m)
+    ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
+    return RefinementError(RefinementError.POISON,
+      s.model(), type_model, src, sv, tv, ids)
   
   if isinstance(type_model[src], FloatType):
     expr = sd + sp + [sv != tv, z3.Not(z3.And(z3.fpIsNaN(sv), z3.fpIsNaN(tv)))]
@@ -521,7 +595,11 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   s.add(expr)
   logger.debug('equality check\n%s', s)
   if s.check() != z3.unsat:
-    return 'unequal', s.model()
+    m = s.model()
+    logger.debug('counterexample: %s', m)
+    ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
+    return RefinementError(RefinementError.UNEQUAL,
+      s.model(), type_model, src, sv, tv, ids)
 
   return None
 

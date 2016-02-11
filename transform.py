@@ -103,22 +103,6 @@ def get_insts(v):
   walk(v, insts, seen)
   return insts
 
-def subterms(term):
-  'Return all subterms of the provided term'
-
-  queue = [term]
-  seen = set()
-
-  while queue:
-    t = queue.pop()
-    if t in seen: continue
-
-    seen.add(t)
-    args = t.args()
-    queue.extend(args)
-
-  return seen
-
 
 class Formatter(Visitor):
   def __init__(self):

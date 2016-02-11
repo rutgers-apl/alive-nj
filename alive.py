@@ -16,8 +16,9 @@ def check_opt(opt, chatty=True):
     if r:
       logging.warning('Optimization %r incorrect: %s', opt.name, r)
       if chatty:
+        print
+        r.write()
         print '\nOptimization is incorrect!'
-        print r
       return False
     
     proofs += 1
