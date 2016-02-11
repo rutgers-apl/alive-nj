@@ -9,19 +9,35 @@ import pretty
 # -----------
 
 class Type(object):
-  pass
+  __slots__ = ()
 
 class IntType(Type):
+  __slots__ = ('width',)
   def __init__(self, width):
     self.width = width
   
   def __repr__(self):
     return 'IntType({0!r})'.format(self.width)
-  
+
+  def __hash__(self):
+    return hash(type(self)) ^ hash(self.width)
+
   def __eq__(self, other):
     return type(other) is IntType and self.width == other.width
 
-# TODO: class PtrType; class ArrayType
+
+class PtrType(Type):
+  __slots__ = ()
+
+  # for now, assume a single pointer type
+  def __eq__(self, other):
+    return type(self) is type(other)
+
+  def __hash__(self):
+    return hash(PtrType) * 2
+
+  def __repr__(self):
+    return 'PtrType()'
 
 
 

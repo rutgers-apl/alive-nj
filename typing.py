@@ -46,8 +46,20 @@ def translate_ty(ty):
   
   if isinstance(ty, IntType):
     return TySort.integer(ty.width)
+  if isinstance(ty, PtrType):
+    return TySort.pointer
   
   assert False # TODO: raise something here
+
+def ty_from_z3(z3_ty):
+  'Translate a Z3 TySort into an Alive Type'
+
+  if z3_ty.decl().eq(TySort.integer):
+    return IntType(z3_ty.arg(0).as_long())
+  if z3_ty.eq(TySort.pointer):
+    return PtrType()
+
+  assert False
 
 def z3_constraints(con, var, maxwidth=64, depth=1):
   if con == FIRST_CLASS:
@@ -219,8 +231,23 @@ class TypeConstraints(BaseTypeConstraints):
     while s.check() == z3.sat:
       model = s.model()
       logger.debug('solution\n%s', model)
-      yield { k: model[vars[r]] for k,r in self.sets.key_reps() }
-      
+
+      ty_model = { r: ty_from_z3(model[v]) for (r,v) in vars.iteritems() }
+      yield TypeModel(self.sets, ty_model)
+
       s.add(z3.Or([v != model[v] for v in nonfixed]))
-      
       logger.debug('solver %s', s)
+
+    logger.debug('No solution')
+
+
+class TypeModel(object):
+  '''Map terms to types.
+  '''
+
+  def __init__(self, sets, model):
+    self.sets = sets
+    self.model = model
+
+  def __getitem__(self, key):
+    return self.model[self.sets.rep(key)]

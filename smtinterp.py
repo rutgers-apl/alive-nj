@@ -3,7 +3,7 @@ Translate expressions into SMT via Z3
 '''
 
 from language import *
-from typing import TypeConstraints, TySort
+from typing import TypeConstraints
 from z3util import *
 import config
 import z3, operator, logging
@@ -105,10 +105,10 @@ class SMTTranslator(Visitor):
     self.qvars += qvars
 
   def bits(self, term):
-    Ty = self.types[term]
-    if Ty.decl().eq(TySort.integer):
-      return Ty.arg(0).as_long()
-    if Ty.eq(TySort.pointer):
+    ty = self.types[term]
+    if isinstance(ty, IntType):
+      return ty.width
+    if isinstance(ty, PtrType):
       return 64
       # NOTE: assume 64-bit pointers, since we don't do anything with them
 
