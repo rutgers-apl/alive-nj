@@ -560,7 +560,8 @@ class BaseTypeConstraints(Visitor):
 
     x = term.val
     bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
-    self.width_ceiling(x-1, term)  # -1 because the ceiling is a hard limit
+    if bl > 0:
+      self.width_ceiling(bl-1, term)  # bl-1 because the ceiling is a hard limit
 
   def UndefValue(self, term):
     self.first_class(term)
