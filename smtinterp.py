@@ -488,8 +488,8 @@ def format_z3val(val):
     s = val.as_signed_long()
 
     if u == s:
-      return '0x{1:0{0}X} ({1})'.format((w+3)/4, u)
-    return '0x{1:0{0}X} ({1}, {2})'.format((w+3)/4, u, s)
+      return '0x{1:0{0}x} ({1})'.format((w+3)/4, u)
+    return '0x{1:0{0}x} ({1}, {2})'.format((w+3)/4, u, s)
 
   #if isinstance(ty, FloatType):
   if isinstance(val, z3.FPRef):
@@ -516,13 +516,39 @@ class RefinementError(object): # exception?
   def write(self):
     print 'ERROR:', self.cause_str[self.cause],
     print 'for', format_ty(self.types[self.src]), self.src.name
+    print
 
-    for k,v in self.ids:
-      print k.name, '=', format_ty(self.types[k]),
-      print format_z3val(self.model.evaluate(v, True))
+    smt = SMTTranslator(self.types)
+
+    vars = [v for v in subterms(self.src) if isinstance(v, (Input, Instruction))]
+    vars = vars[1:]
+
+# this bit doesn't work if the target contains explicit undef
+#     tvars = [v for v in subterms(self.tgt) if isinstance(v, Instruction)]
+#     tvars = tvars[1:]
+#     tvars.extend(vars)
+#     vars = tvars
+
+    # calling eval on all the subterms of self.src is O(n^2), but
+    # we only do this for error messages and n is typically small
+    # so it probably doesn't matter
+    ty_width = 1
+    name_width = 1
+    rows = []
+    for v in vars:
+      ty = format_ty(self.types[v])
+      name = v.name
+      rows.append((ty,name, format_z3val(self.model.evaluate(smt.eval(v), True))))
+        # it shouldn't matter that these will get new qvars,
+        # because those will just get defaulted anyway
+      if len(ty) > ty_width: ty_width = len(ty)
+      if len(name) > name_width: name_width = len(name)
+
+    print 'Example:'
+    for ty,name,val in reversed(rows):
+      print '{0:>{1}} {2:{3}} = {4}'.format(ty,ty_width,name,name_width,val)
 
     src_v = self.model.evaluate(self.srcv, True)
-    print
     print 'source:', format_z3val(src_v)
 
     if self.cause == self.UB:
