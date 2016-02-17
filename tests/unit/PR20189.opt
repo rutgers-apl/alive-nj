@@ -1,0 +1,5 @@
+; ERROR: Target introduces poison
+%B = sub 0, %A
+%C = sub nsw %x, %B
+  =>
+%C = add nsw %x, %A

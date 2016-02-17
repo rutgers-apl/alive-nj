@@ -1,0 +1,4 @@
+; ERROR: Input C2 not in source
+%x = C1
+  =>
+%x = C2

@@ -1,0 +1,4 @@
+Pre: width(%b) > 1
+%a = add %b, %b
+  =>
+%a = shl %b, 1

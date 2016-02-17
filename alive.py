@@ -14,11 +14,11 @@ def check_opt(opt, chatty=True):
   for m in opt.type_models():
     r = opt.check_refinement(m)
     if r:
-      logging.warning('Optimization %r incorrect: %s', opt.name, r)
+#       logging.warning('Optimization %r incorrect: %s', opt.name, r)
       if chatty:
         print
         r.write()
-        print '\nOptimization is incorrect!'
+        print '\nOptimization is incorrect'
       return False
     
     proofs += 1

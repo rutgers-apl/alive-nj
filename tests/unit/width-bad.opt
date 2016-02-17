@@ -1,0 +1,4 @@
+; ERROR: Target introduces undefined behavior
+%a = add %b, %b
+  =>
+%a = shl %b, 1

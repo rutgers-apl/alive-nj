@@ -1,0 +1,7 @@
+; ERROR: Input C1 not in source
+Pre: C0 == C1
+
+%xc = mul %x, C0
+%r = add %xc, %x
+  =>
+%r = mul %x, C0+1

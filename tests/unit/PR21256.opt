@@ -1,0 +1,5 @@
+; ERROR: Target introduces undefined behavior
+%Op1 = sub 0, %X
+%r = srem %Op0, %Op1
+  =>
+%r = srem %Op0, %X

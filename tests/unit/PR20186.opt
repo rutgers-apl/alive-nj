@@ -1,0 +1,5 @@
+; ERROR: Target introduces undefined behavior
+%a = sdiv %X, C
+%r = sub 0, %a
+  =>
+%r = sdiv %X, -C
