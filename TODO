@@ -1,1 +1,7 @@
+- generate benchmarks
 - seperate type checking of source and souce+target
+- better type errors
+- unreachable
+- composition?
+- memory ops?
+- flag inference?
