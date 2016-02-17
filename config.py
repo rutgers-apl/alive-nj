@@ -50,6 +50,7 @@ logs = {
   },
   
   'loggers': {
+#      'typing': { 'level': 'DEBUG' },
 #     'smtinterp': {
 #       'level': 'WARNING',
 #     }

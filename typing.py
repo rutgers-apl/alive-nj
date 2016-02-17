@@ -4,6 +4,7 @@ Apply typing constraints to the IR.
 
 from language import *
 import disjoint, logging, collections, z3, pretty
+import itertools
 
 logger = logging.getLogger(__name__)
 
@@ -127,11 +128,12 @@ def z3_constraints(con, var, maxwidth=64, depth=1):
 
 
 class TypeConstraints(BaseTypeConstraints):
-  def __init__(self):
+  def __init__(self, maxwidth=64):
     self.sets = disjoint.DisjointSubsets()
     self.specifics = {}
     self.constraints = {}
     self.ordering = set() # pairs (x,y) where width(x) < width(y)
+    self.widthlimit = maxwidth+1
 
   def __call__(self, term):
     self.ensure(term)
@@ -287,6 +289,88 @@ class TypeConstraints(BaseTypeConstraints):
 
     logger.debug('No solution')
 
+  def type_models(self):
+    logger.debug('generating models')
+    self.simplify_orderings()
+
+    model = {}
+
+    # collect sets with fixed types
+    for r,ty in self.specifics.iteritems():
+      if r in self.constraints and not \
+          meets_constraint(self.constraints[r], ty):
+        raise IncompatibleConstraints
+      model[r] = ty
+
+    for lo,hi in self.ordering:
+      if lo in model and hi in model and model[lo].width >= model[hi].width:
+        raise IncompatibleConstraints
+      if isinstance(lo, int) and hi in model and lo >= model[hi].width:
+        raise IncompatibleConstraints
+
+    vars = tuple(r for r in self.sets.reps() if r not in self.specifics)
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('variables:\n  ' + pretty.pformat(vars, indent=2))
+      logger.debug('initial model:\n  ' + pretty.pformat(model, indent=2))
+
+    return self._iter_models(0, vars, model)
+
+  float_tys = (HalfType(), SingleType(), DoubleType())
+
+  def _iter_models(self, n, vars, model):
+    if n == len(vars):
+      if logger.isEnabledFor(logging.DEBUG):
+        logger.debug('emitting model\n  ' + pretty.pformat(model, indent=2))
+
+      yield TypeModel(self.sets, dict(model))
+      return
+
+    v = vars[n]
+    con = self.constraints.get(v, FIRST_CLASS)
+    if con == FIRST_CLASS:
+      tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),), self.float_tys)
+    elif con == FLOAT:
+      tys = self.float_tys
+    elif con == INT_PTR:
+      tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),))
+    elif con == PTR:
+      tys = (PtrType(),)
+    elif con == INT:
+      # this is the only case where we can have an ordering constraint
+      wmin = 1
+      wmax = self.widthlimit
+      for lo,hi in self.ordering:
+        if lo == v and hi in model and model[hi].width < wmax:
+          wmax = model[hi].width
+        elif hi == v and lo in model and model[lo].width > wmin:
+          wmin = model[lo].width
+        elif hi == v and isinstance(lo, int) and lo >= wmin:
+          wmin = lo+1
+
+      logger.debug('Int range [%s,%s) for %s', wmin, wmax, v)
+      tys = self._ints(wmin,wmax)
+
+    elif con == BOOL:
+      tys = (IntType(1),)
+    else:
+      assert False
+
+    for ty in tys:
+      model[v] = ty
+      for m in self._iter_models(n+1, vars, model):
+        yield m
+
+  def _ints(self, wmin, wmax):
+    if wmin <= 4 < wmax:
+      yield IntType(4)
+    if wmin <= 8 < wmax:
+      yield IntType(8)
+    for w in xrange(wmin, min(wmax,4)):
+      yield IntType(w)
+    for w in xrange(max(wmin,5),min(wmax,8)):
+      yield IntType(w)
+    for w in xrange(max(wmin,9), wmax):
+      yield IntType(w)
 
 class TypeModel(object):
   '''Map terms to types.

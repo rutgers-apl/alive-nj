@@ -42,8 +42,8 @@ class Transform(object):
 
     return t
 
-  def z3_models(self):
-    return self.type_constraints().z3_models()
+  def type_models(self):
+    return self.type_constraints().type_models()
 
   def check_refinement(self, model):
     logger.info('%s: Checking refinement', self.name)
