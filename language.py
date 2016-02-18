@@ -3,6 +3,7 @@ Defines the internal representation as nodes in a DAG.
 '''
 
 import pretty
+import itertools
 
 
 # Type system
@@ -248,6 +249,16 @@ class SelectInst(Instruction):
 class Constant(Value):
   pass
 
+class Symbol(Input, Constant):
+  '''Symbolic constants.
+  '''
+  pass
+# These behave like Inputs. In particular, Symbol defaults to Input in
+# visitors. Having a separate class that inherits from both avoids the
+# need for code like
+#   isinstance(x, Constant) or (isinstance(x, Input) and x.name[0] == 'C')
+# and is cleaner in general
+
 class Literal(Constant):
   __slots__ = ('val',)
 
@@ -318,9 +329,18 @@ class FunCnxp(Constant):
   __slots__ = ('_args',)
   codes = {}
 
+  @classmethod
+  def check_args(cls, args):
+    if len(args) != len(cls.sig):
+      raise BadArgumentCount(len(cls.sig), len(args))
+
+    for i in xrange(len(args)):
+      if not isinstance(args[i], cls.sig[i]):
+        raise BadArgumentKind(i, cls.sig[i])
+
   def __init__(self, *args):
+    self.check_args(args)
     self._args = args
-    assert len(args) == self.arity
 
   def pretty(self):
     return pretty.group(type(self).__name__, '(', pretty.lbreak,
@@ -331,75 +351,75 @@ class FunCnxp(Constant):
     return self._args
 
 class AbsCnxp(FunCnxp):
-  arity = 1
+  sig  = (Constant,)
   code = 'abs'
 
 class SignBitsCnxp(FunCnxp):
-  arity = 1
-  code  = 'ComputeNumSignBits'
+  sig  = (Value,)
+  code = 'ComputeNumSignBits'
 
 class OneBitsCnxp(FunCnxp):
-  arity = 1
-  code  = 'computeKnownOneBits'
+  sig  = (Value,)
+  code = 'computeKnownOneBits'
 
 class ZeroBitsCnxp(FunCnxp):
-  arity = 1
-  code  = 'computeKnownZeroBits'
+  sig  = (Value,)
+  code = 'computeKnownZeroBits'
 
 class LeadingZerosCnxp(FunCnxp):
-  arity = 1
-  code  = 'countLeadingZeros'
+  sig  = (Constant,)
+  code = 'countLeadingZeros'
 
 class TrailingZerosCnxp(FunCnxp):
-  arity = 1
-  code  = 'countTrailingZeros'
+  sig  = (Constant,)
+  code = 'countTrailingZeros'
 
 class LShrFunCnxp(FunCnxp):
-  arity = 2
-  code  = 'lshr'
+  sig  = (Constant, Constant)
+  code = 'lshr'
 
 class Log2Cnxp(FunCnxp):
-  arity = 1
-  code  = 'log2'
+  sig  = (Constant,)
+  code = 'log2'
 
 class SMaxCnxp(FunCnxp):
-  arity = 2
-  code  = 'max'
+  sig  = (Constant, Constant)
+  code = 'max'
 
 class SExtCnxp(FunCnxp):
-  arity = 1
-  code  = 'sext'
+  sig  = (Constant,)
+  code = 'sext'
 
 class TruncCnxp(FunCnxp):
-  arity = 1
-  code  = 'trunc'
+  sig  = (Constant,)
+  code = 'trunc'
 
 class UMaxCnxp(FunCnxp):
-  arity = 2
-  code  = 'umax'
+  sig  = (Constant, Constant)
+  code = 'umax'
 
 class WidthCnxp(FunCnxp):
-  arity = 1
+  sig  = (Value,)
   code = 'width'
 
 class ZExtCnxp(FunCnxp):
-  arity = 1
+  sig  = (Constant,)
   code = 'zext'
 
 class FPtoSICnxp(FunCnxp):
-  arity = 1
-  code  = 'fptosi'
+  sig  = (Constant,)
+  code = 'fptosi'
 
 class FPtoUICnxp(FunCnxp):
-  arity = 1
+  sig   = (Constant,)
   code  = 'fptoui'
 
 class SItoFPCnxp(FunCnxp):
-  arity = 1
+  sig   = (Constant,)
   code  = 'sitofp'
 
 class UItoFPCnxp(FunCnxp):
-  arity = 1
+  sig   = (Constant,)
   code  = 'uitofp'
 
 # Predicates
@@ -463,9 +483,18 @@ class FunPred(Predicate):
   __slots__ = ('_args',)
   codes = {}
 
+  @classmethod
+  def check_args(cls, args):
+    if len(args) != len(cls.sig):
+      raise BadArgumentCount(len(cls.sig), len(args))
+
+    for i in xrange(len(args)):
+      if not isinstance(args[0], cls.sig[0]):
+        raise BadArgumentKind(i, cls.sig[0])
+
   def __init__(self, *args):
+    self.check_args(args)
     self._args = args
-    assert len(args) == self.arity
 
   def pretty(self):
     return pretty.group(type(self).__name__, '(', pretty.lbreak,
@@ -476,55 +505,55 @@ class FunPred(Predicate):
     return self._args
 
 class IntMinPred(FunPred): 
-  arity = 1
+  sig  = (Constant,)
   code = 'isSignBit'
 
 class Power2Pred(FunPred):
-  arity = 1
+  sig   = (Value,)
   code  = 'isPowerOf2'
 
 class Power2OrZPred(FunPred):
-  arity = 1
+  sig   = (Value,)
   code  = 'isPowerOf2OrZero'
 
 class ShiftedMaskPred(FunPred):
-  arity = 1
+  sig   = (Constant,)
   code  = 'isShiftedMask'
 
 class MaskZeroPred(FunPred):
-  arity = 2
+  sig   = (Value, Constant)
   code  = 'MaskedValueIsZero'
 
 class NSWAddPred(FunPred):
-  arity = 2
+  sig   = (Value, Value)
   code  = 'WillNotOverflowSignedAdd'
 
 class NUWAddPred(FunPred):
-  arity = 2
+  sig   = (Value, Value)
   code  = 'WillNotOverflowUnsignedAdd'
 
 class NSWSubPred(FunPred):
-  arity = 2
+  sig   = (Value, Value)
   code  = 'WillNotOverflowSignedSub'
 
 class NUWSubPred(FunPred):
-  arity = 2
+  sig   = (Value, Value)
   code  = 'WillNotOverflowUnsignedSub'
 
 class NSWMulPred(FunPred):
-  arity = 2
+  sig   = (Constant, Constant)
   code  = 'WillNotOverflowSignedMul'
 
 class NUWMulPred(FunPred):
-  arity = 2
+  sig   = (Constant, Constant)
   code  = 'WillNotOverflowUnsignedMul'
 
 class NUWShlPred(FunPred):
-  arity = 2
+  sig   = (Constant, Constant)
   code  = 'WillNotOverflowUnsignedShl'
 
 class OneUsePred(FunPred):
-  arity = 1
+  sig   = ((Input, Instruction),)  # NOTE: one arg that is Input or Instruction
   code  = 'hasOneUse'
 
 # Utilities
@@ -548,10 +577,6 @@ def subterms(term):
 
 # Visitor
 # -------
-
-class UnmatchedCase(Exception):
-  pass
-
 
 class MetaVisitor(type):
   '''Fill out the visiting functions which aren't explicitly defined by a
@@ -602,10 +627,10 @@ def _int_pred(self, term):
 
 class BaseTypeConstraints(Visitor):
   def Input(self, term):
-    if term.name[0] == 'C':
-      self.number(term)
-    else:
-      self.first_class(term)
+    self.first_class(term)
+
+  def Symbol(self, term):
+    self.number(term)
 
   def IntBinaryOperator(self, term):
     self.specific(term, term.ty)
@@ -824,3 +849,32 @@ class BaseTypeConstraints(Visitor):
   
   def OneUsePred(self, term):
     pass
+
+
+# Errors
+# ------
+
+class UnmatchedCase(Exception):
+  pass
+
+class BadArgumentCount(Exception):
+  def __init__(self, wanted, got):
+    self.wanted = wanted
+    self.got = got
+
+  def __str__(self):
+    return 'expected {} received {}'.format(self.wanted, self.got)
+
+class BadArgumentKind(Exception):
+  def __init__(self, idx, kind):
+    self.idx = idx
+    self.kind = kind
+
+  kinds = {
+    Value: 'any value',
+    Constant: 'constant',
+    (Input,Instruction): 'register',
+  }
+
+  def __str__(self):
+    return 'parameter {} expected {}'.format(self.idx+1, self.kinds[self.kind])

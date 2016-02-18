@@ -98,13 +98,13 @@ class Name(ValAst):
       return ids[self.id]
 
     if phase == Phase.Source:
-      ids[self.id] = L.Input(self.id)
+      ids[self.id] = self.cls(self.id)
       return ids[self.id]
 
     self._fatal('Input {} not in source'.format(self.id))
 
-class Register(Name): pass
-class ConstName(Name): pass
+class Register(Name):  cls = L.Input
+class ConstName(Name): cls = L.Symbol
 
 def yieldPairs(toks):
   it = iter(toks)
@@ -203,16 +203,15 @@ class FunAst(ValAst, PreconditionAst):
       self._fatal('Unknown predicate: ' + name)
 
     pred = predicates[name]
-    
-    # check arity
-    if len(self.toks)-1 != pred.arity:
-      self._fatal('Wrong number of arguments to {0}: expected {1} received {2}'.format(
-        name, pred.arity, len(self.toks)-1))
 
     args = tuple(a.value(None, ids, Phase.Pre) for a in self.toks[1:])
-    
-    return pred(*args)
 
+    try:
+      return pred(*args)
+    except L.BadArgumentCount, e:
+      self._fatal('Wrong number of arguments to {0}: {1}'.format(name, e))
+    except L.BadArgumentKind, e:
+      self.toks[e.idx+1]._fatal('{} {}'.format(name, e))
 
   def value(self, ty, ids, phase):
     if phase == Phase.Source:
@@ -225,15 +224,15 @@ class FunAst(ValAst, PreconditionAst):
       self._fatal('Unknown function: ' + name)
     
     fun = functions[name]
-    
-    # check arity
-    if len(self.toks)-1 != fun.arity:
-      self._fatal('Wrong number of arugments to {0}: expected {1} received {2}'.format(
-        name, fun.arity, len(self.toks)-1))
 
     args = tuple(a.value(None, ids, phase) for a in self.toks[1:])
-    
-    return fun(*args)
+
+    try:
+      return fun(*args)
+    except L.BadArgumentCount, e:
+      self._fatal('Wrong number of arguments to {0}: {1}'.format(name, e))
+    except L.BadArgumentKind, e:
+      self.toks[e.idx+1]._fatal('{} {}'.format(name, e))
 
 
 class OpInstAst(Ast):

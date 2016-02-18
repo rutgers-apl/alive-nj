@@ -11,10 +11,6 @@ import z3, operator, logging
 
 logger = logging.getLogger(__name__)
 
-def is_const(term):
-  return isinstance(term, Constant) or \
-    (isinstance(term, Input) and term.name[0] == 'C')
-
 def _mk_bop(op, defined = None, poisons = None):
   def bop(self, term):
     x = self.eval(term.x)
@@ -52,7 +48,7 @@ def _mk_must_analysis(op):
   def pred(self, term):
     x = self.eval(term._args[0])
 
-    if is_const(x):
+    if isinstance(x, Constant):
       return op(x)
 
     c = self.fresh_bool()
@@ -66,7 +62,7 @@ def _mk_bin_must_analysis(op):
     x = self.eval(term._args[0])
     y = self.eval(term._args[1])
 
-    if all(is_const(a) for a in term._args):
+    if all(isinstance(a, Constant) for a in term._args):
       return op(x,y)
 
     c = self.fresh_bool()

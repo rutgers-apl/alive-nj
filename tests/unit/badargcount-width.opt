@@ -1,0 +1,4 @@
+; ERROR: Wrong number of arguments to width
+%x = add %a, %b
+=>
+%x = width(%a, %b)

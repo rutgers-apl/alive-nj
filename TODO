@@ -10,4 +10,3 @@
 - composition?
 - memory ops?
 - flag inference?
-- restrict function/predicate argument kinds (register/constant/etc)
