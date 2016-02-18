@@ -37,6 +37,16 @@ class IntTypeAst(TypeAst):
   def eval(self, ids, phase):
     return L.IntType(self.toks[1])
 
+class FloatTypeAst(TypeAst):
+  codes = {
+    'half': L.HalfType(),
+    'float': L.SingleType(),
+    'double': L.DoubleType(),
+  }
+
+  def eval(self, ids, phase):
+    return self.codes[self.toks[0]]
+
 class OptionalTypeAst(TypeAst):
   def eval(self, ids, phase):
     if self.toks:
@@ -307,6 +317,14 @@ class ICmpAst(InstAst):
     return L.IcmpInst(self.toks.cmp, x, y, ty, name)
     # FIXME: validate cmp?
 
+class FCmpAst(InstAst):
+  def inst(self, name, ids, phase):
+    ty = self.toks.ty.eval(ids, phase)
+    x  = self.toks.x.value(ty, ids, phase)
+    y  = self.toks.y.value(ty, ids, phase)
+
+    return L.FcmpInst(self.toks.cmp, x, y, ty, name)
+
 
 class SelectAst(InstAst):
   def inst(self, name, ids, phase):
@@ -378,7 +396,9 @@ class SelectAst(InstAst):
 
 posnum = Word(nums).setParseAction(lambda s,l,t: int(t[0]))
 
-ty = ('i' + posnum).setName('type').setParseAction(IntTypeAst)
+ty = ('i' + posnum).setParseAction(IntTypeAst) \
+  | oneOf('half float double').setParseAction(FloatTypeAst)
+ty.setName('type')
 
 opt_ty = Optional(ty).setParseAction(OptionalTypeAst)
 
@@ -470,6 +490,9 @@ cmpOp = Optional(ident, '')
 icmp = Literal('icmp') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
 icmp.setParseAction(ICmpAst)
 
+fcmp = Literal('fcmp') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
+fcmp.setParseAction(FCmpAst)
+
 select = Literal('select') - opt_ty('ty') + operand('pred') \
   + comma + opt_ty('tty') + operand('tval') + comma + opt_ty('fty') + operand('fval')
 select.setParseAction(SelectAst)
@@ -496,7 +519,7 @@ select.setParseAction(SelectAst)
 # load = Suppress('load') + opt_ty('ty') + operand('x') + (comma + Suppress('align') + posnum('align')|FollowedBy(LineEnd()))
 # load.setParseAction(LoadExpr)
 # 
-op = binOp | convOp | icmp | select | copyOp # | alloca | gep | load | copyOp
+op = binOp | convOp | icmp | fcmp | select | copyOp # | alloca | gep | load | copyOp
 op.setName('operator')
 
 

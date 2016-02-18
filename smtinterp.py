@@ -133,23 +133,16 @@ class SMTTranslator(Visitor):
   def add_qvar(self, *qvars):
     self.qvars += qvars
 
-  def bits(self, term):
-    ty = self.types[term]
-    if isinstance(ty, IntType):
-      return ty.width
-    if isinstance(ty, PtrType):
-      return 64
-      # NOTE: assume 64-bit pointers, since we don't do anything with them
-
-    assert False
+  def type(self, term):
+    return self.types[term]
 
   def fresh_bool(self):
     self.fresh += 1
     return z3.Bool('ana_' + str(self.fresh))
 
-  def fresh_bv(self, size, prefix='ana_'):
+  def fresh_var(self, ty, prefix='undef_'):
     self.fresh += 1
-    return z3.BitVec(prefix + str(self.fresh), size)
+    return z3.Const(prefix + str(self.fresh), _ty_sort(ty))
 
   def Input(self, term):
     # TODO: unique name check
@@ -211,27 +204,28 @@ class SMTTranslator(Visitor):
   FRemInst = _mk_fp_bop(z3.fpRem)
 
 
+  # NOTE: SExt/ZExt/Trunc should all have IntType args
   def SExtInst(self, term):
     v = self.eval(term.arg)
-    src = self.bits(term.arg)
-    tgt = self.bits(term)
+    src = self.type(term.arg).width
+    tgt = self.type(term).width
     return z3.SignExt(tgt - src, v)
 
   def ZExtInst(self, term):
     v = self.eval(term.arg)
-    src = self.bits(term.arg)
-    tgt = self.bits(term)
+    src = self.type(term.arg).width
+    tgt = self.type(term).width
     return z3.ZeroExt(tgt - src, v)
 
   def TruncInst(self, term):
     v = self.eval(term.arg)
-    tgt = self.bits(term)
+    tgt = self.type(term).width
     return z3.Extract(tgt - 1, 0, v)
 
   def ZExtOrTruncInst(self, term):
     v = self.eval(term.arg)
-    src = self.bits(term.arg)
-    tgt = self.bits(term)
+    src = self.type(term.arg).width
+    tgt = self.type(term).width
     
     if tgt == src:
       return v
@@ -239,6 +233,65 @@ class SMTTranslator(Visitor):
       return z3.ZeroExt(tgt - src, v)
     
     return z3.Extract(tgt-1, 0, v)
+
+  # TODO: find better way to do range checks for [su]itofp, fpto[su]i
+  def FPtoSIInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+    # TODO: fptosi range check
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    x = z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
+
+    return z3.If(
+      z3.fpToFP(z3.RTZ(), x, _ty_sort(src)) == z3.fpRoundToIntegral(z3.RTZ(),v),
+      x, q)
+
+  def FPtoUIInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+    # TODO: fptoui range check
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    x = z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
+
+    return z3.If(
+      z3.fpToFPUnsigned(z3.RTZ(), x, _ty_sort(src)) == z3.fpRoundToIntegral(z3.RTZ(),v),
+      x, q)
+
+  def SItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    if src.width + 1 <= tgt.frac:
+      return z3.fpToFP(z3.RTZ(), v, _ty_sort(tgt))
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    x = z3.fpToFP(z3.RTZ(), v, _ty_sort(tgt))
+    return z3.If(z3.fpToSBV(z3.RTZ(), x, _ty_sort(src)) == v, x, q)
+
+  def UItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    if src.width < tgt.frac:
+      return z3.fpToFPUnsigned(z3.RTZ(), v, _ty_sort(tgt))
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    x = z3.fpToFPUnsigned(z3.RTZ(), v, _ty_sort(tgt))
+    return z3.If(z3.fpToUBV(z3.RTZ(), x, _ty_sort(src)) == v, x, q)
 
   def IcmpInst(self, term):
     x = self.eval(term.x)
@@ -257,7 +310,36 @@ class SMTTranslator(Visitor):
       'sle': operator.le}[term.pred](x,y)
 
     return bool_to_BitVec(cmp)
-  
+
+  # TODO: fcmp flags
+  def FcmpInst(self, term):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    def unordered(f):
+      return lambda x,y: z3.Or(op(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
+
+    cmp = {
+      'false': lambda x,y: z3.BoolVal(False),
+      'oeq': z3.fpEQ,
+      'ogt': z3.fpGT,
+      'oge': z3.fpGEQ,
+      'olt': z3.fpLT,
+      'ole': z3.fpLEQ,
+      'one': z3.fpNEQ,
+      'ord': lambda x,y: z3.Not(z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y))),
+      'ueq': unordered(z3.fpEQ),
+      'ugt': unordered(z3.fpGT),
+      'uge': unordered(z3.fpGEQ),
+      'ult': unordered(z3.fpLT),
+      'ule': unordered(z3.fpLEQ),
+      'une': unordered(z3.fpNEQ),
+      'uno': lambda x,y: z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y)),
+      'true': lambda x,y: z3.BoolVal(True),
+      }[term.pred](x,y)
+
+    return bool_to_BitVec(cmp)
+
   def SelectInst(self, term):
     c = self.eval(term.sel)
     x = self.eval(term.arg1)
@@ -266,32 +348,35 @@ class SMTTranslator(Visitor):
     return z3.If(c == 1, x, y)
 
   def Literal(self, term):
-    return z3.BitVecVal(term.val, self.bits(term))
+    ty = self.type(term)
+    if isinstance(ty, FloatType):
+      return z3.FPVal(term.val, _ty_sort(ty))
+
+    return z3.BitVecVal(term.val, ty.width)
 
   def FLiteral(self, term):
-    ty = self.types[term]
+    ty = self.type(term)
     assert isinstance(ty, FloatType)
 
     return z3.FPVal(term.val, _ty_sort(ty))
 
 
   def UndefValue(self, term):
-    ty = self.types[term]
-    self.fresh += 1
-    name = 'undef_' + str(self.fresh)
-
-    x = z3.Const(name, _ty_sort(ty))
+    ty = self.type(term)
+    x = self.fresh_var(ty)
     self.add_qvar(x)
     return x
 
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
+  # FIXME: cnxps need explicit undef checking
+  # FIXME: div/rem by 0 is undef
   AddCnxp = _mk_bop(operator.add)
   SubCnxp = _mk_bop(operator.sub)
   MulCnxp = _mk_bop(operator.mul)
   SDivCnxp = _mk_bop(operator.div)
   UDivCnxp = _mk_bop(z3.UDiv)
-  SRemCnxp = _mk_bop(z3.SRem)
+  SRemCnxp = _mk_bop(operator.mod)
   URemCnxp = _mk_bop(z3.URem)
   ShlCnxp = _mk_bop(operator.lshift)
   AShrCnxp = _mk_bop(operator.rshift)
@@ -304,36 +389,42 @@ class SMTTranslator(Visitor):
     return ~self.eval(term.x)
 
   def NegCnxp(self, term):
+    if isinstance(self.type(term), FloatType):
+      return z3.fpNeg(self.eval(term.x))
+
     return -self.eval(term.x)
 
   def AbsCnxp(self, term):
     x = self.eval(term._args[0])
 
+    if isinstance(self.type(term), FloatType):
+      return z3.fpAbs(x)
+
     return z3.If(x >= 0, x, -x)
 
   def SignBitsCnxp(self, term):
     x = self.eval(term._args[0])
-    size = self.bits(term)
+    ty = self.type(term)
 
     #b = ComputeNumSignBits(self.fresh_bv(size), size)
-    b = self.fresh_bv(size)
-    
-    self.add_defs(z3.ULE(b, ComputeNumSignBits(x, size)))
+    b = self.fresh_var(ty, 'ana_')
+
+    self.add_defs(z3.ULE(b, ComputeNumSignBits(x, ty.width)))
 
     return b
 
   def OneBitsCnxp(self, term):
     x = self.eval(term._args[0])
-    b = self.fresh_bv(x.size())
-    
+    b = self.fresh_var(self.type(term), 'ana_')
+
     self.add_defs(b & ~x == 0)
 
     return b
 
   def ZeroBitsCnxp(self, term):
     x = self.eval(term._args[0])
-    b = self.fresh_bv(x.size())
-    
+    b = self.fresh_var(self.type(term), 'ana_')
+
     self.add_defs(b & x == 0)
 
     return b
@@ -341,17 +432,17 @@ class SMTTranslator(Visitor):
   def LeadingZerosCnxp(self, term):
     x = self.eval(term._args[0])
 
-    return ctlz(x, self.bits(term))
+    return ctlz(x, self.type(term).width)
 
   def TrailingZerosCnxp(self, term):
     x = self.eval(term._args[0])
     
-    return cttz(x, self.bits(term))
+    return cttz(x, self.type(term).width)
 
   def Log2Cnxp(self, term):
     x = self.eval(term._args[0])
 
-    return bv_log2(x, self.bits(term))
+    return bv_log2(x, self.type(term).width)
 
   def LShrFunCnxp(self, term):
     x = self.eval(term._args[0])
@@ -374,23 +465,47 @@ class SMTTranslator(Visitor):
   def SExtCnxp(self, term):
     x = self.eval(term._args[0])
 
-    bits = self.bits(term)
+    bits = self.type(term).width
     return z3.SignExt(bits - x.size(), x)
 
   def ZExtCnxp(self, term):
     x = self.eval(term._args[0])
 
-    bits = self.bits(term)
+    bits = self.type(term).width
     return z3.ZeroExt(bits - x.size(), x)
 
   def TruncCnxp(self, term):
     x = self.eval(term._args[0])
 
-    bits = self.bits(term)
+    bits = self.type(term).width
     return z3.Extract(bits-1, 0, x)
 
+  def FPtoSICnxp(self, term):
+    x = self.eval(term._args[0])
+    tgt = self.type(term)
+
+    return z3.fpToSBV(z3.RTZ(), x, _ty_sort(tgt))
+
+  def FPtoUICnxp(self, term):
+    x = self.eval(term._args[0])
+    tgt = self.type(term)
+
+    return z3.fpToUBV(z3.RTZ(), x, _ty_sort(tgt))
+
+  def SItoFPCnxp(self, term):
+    x = self.eval(term._args[0])
+    tgt = self.type(term)
+
+    return z3.fpToFP(z3.RTZ(), x, _ty_sort(tgt))
+
+  def UItoFPCnxp(self, term):
+    x = self.eval(term._args[0])
+    tgt = self.type(term)
+
+    return z3.fpToFPUnsigned(z3.RTZ(), x, _ty_sort(tgt))
+
   def WidthCnxp(self, term):
-    return z3.BitVecVal(self.bits(term._args[0]), self.bits(term))
+    return z3.BitVecVal(self.type(term._args[0]).width, self.type(term).width)
     # NOTE: nothing bad should happen if we don't evaluate the argument
 
   def AndPred(self, term):

@@ -1,7 +1,13 @@
+- fcmp: flags
+- fpext, fptrunc
+- fptosi, fptoui, sitofp, uitofp
+	- decide what to do about out-of-range inputs
 - generate benchmarks
-- seperate type checking of source and souce+target
+- seperate type checking of source and source+target
 - better type errors
+- [fi]cmp predicate vars
 - unreachable
 - composition?
 - memory ops?
 - flag inference?
+- restrict function/predicate argument kinds (register/constant/etc)

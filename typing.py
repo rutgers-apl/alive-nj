@@ -8,7 +8,7 @@ import itertools
 
 logger = logging.getLogger(__name__)
 
-FIRST_CLASS, FLOAT, INT_PTR, PTR, INT, BOOL, Last = range(7)
+FIRST_CLASS, NUMBER, FLOAT, INT_PTR, PTR, INT, BOOL, Last = range(8)
 
 class IncompatibleConstraints(Exception):
   pass
@@ -17,6 +17,13 @@ class IncompatibleConstraints(Exception):
 def most_specific(c1,c2):
   if c1 > c2:
     c1,c2 = c2,c1
+
+  if c1 == NUMBER:
+    if c2 == PTR:
+      raise IncompatibleConstraints 
+
+    if c2 == INT_PTR:
+      return INT
 
   if c1 == FLOAT and c2 != FLOAT:
     raise IncompatibleConstraints
@@ -30,6 +37,8 @@ def most_specific(c1,c2):
 def meets_constraint(con, ty):
   if con == FIRST_CLASS:
     return isinstance(ty, (IntType, FloatType, PtrType))
+  if con == NUMBER:
+    return isinstance(ty, (IntType, FloatType))
   if con == FLOAT:
     return isinstance(ty, FloatType)
   if con == INT_PTR:
@@ -204,6 +213,9 @@ class TypeConstraints(BaseTypeConstraints):
   def float(self, term):
     self.constrain(term, FLOAT)
 
+  def number(self, term):
+    self.constrain(term, NUMBER)
+
   def first_class(self, term):
     self.constrain(term, FIRST_CLASS)
 
@@ -292,6 +304,11 @@ class TypeConstraints(BaseTypeConstraints):
   def type_models(self):
     logger.debug('generating models')
     self.simplify_orderings()
+    
+    numbers = [r for (r,con) in self.constraints.iteritems() if con == NUMBER]
+    if numbers:
+      logger.warning('NUMBER constraint(s) survived unification\n  %s',
+        pretty.pformat(numbers, indent=2))
 
     model = {}
 
@@ -329,6 +346,8 @@ class TypeConstraints(BaseTypeConstraints):
     con = self.constraints.get(v, FIRST_CLASS)
     if con == FIRST_CLASS:
       tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),), self.float_tys)
+    elif con == NUMBER:
+      tys = itertools.chain(self._ints(1, self.widthlimit), self.float_tys)
     elif con == FLOAT:
       tys = self.float_tys
     elif con == INT_PTR:

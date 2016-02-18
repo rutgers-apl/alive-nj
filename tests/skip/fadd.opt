@@ -1,0 +1,32 @@
+Name: addsub:1338
+; slow
+%na = fsub -0.0, %a
+%r  = fadd %na, %b
+  =>
+%r  = fsub %b, %a
+
+; they claim to also do -A + -B => -(A+B), but I don't see it
+
+; NOTE: why?
+Name: addsub:1338
+; slow
+%r = fadd C, %b
+=>
+%r = fsub %b, -C
+
+
+; NOTE: why?
+Name: addsub:1345
+%r = fadd %a, C
+=>
+%r = fsub %a, -C
+
+
+Name: addsub:1354
+Pre: sitofp(fptosi(C)) == C && WillNotOverflowSignedAdd(%a, fptosi(C)) \
+	 && width(%a) > 1
+%x = sitofp %a
+%r = fadd %x, C
+=>
+%y = add nsw %a, fptosi(C)
+%r = sitofp %y

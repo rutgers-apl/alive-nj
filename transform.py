@@ -143,6 +143,12 @@ class Formatter(Visitor):
       return ''
     if isinstance(ty, IntType):
       return 'i' + str(ty.width)
+    if isinstance(ty, HalfType):
+      return 'half'
+    if isinstance(ty, SingleType):
+      return 'float'
+    if isinstance(ty, DoubleType):
+      return 'double'
 
     assert False
 

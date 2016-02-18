@@ -197,12 +197,29 @@ class TruncInst(ConversionInst):
   code = 'trunc'
 
 class ZExtOrTruncInst(ConversionInst): code = 'ZExtOrTrunc'
+class FPtoSIInst(ConversionInst): code = 'fptosi'
+class FPtoUIInst(ConversionInst): code = 'fptoui'
+class SItoFPInst(ConversionInst): code = 'sitofp'
+class UItoFPInst(ConversionInst): code = 'uitofp'
 
 class IcmpInst(Instruction):
   __slots__ = ('pred', 'x', 'y', 'ty', 'name')
 
   def __init__(self, pred, arg1, arg2, ty = None, name = ''):
     self.pred = pred # FIXME: handle comparison ops better somehow?
+    self.ty   = ty
+    self.x    = arg1
+    self.y    = arg2
+    self.name = name
+
+  def args(self):
+    return (self.x, self.y)
+
+class FcmpInst(Instruction):
+  __slots__ = ('pred','x','y','ty','name')
+
+  def __init__(self, pred, arg1, arg2, ty=None, name=''):
+    self.pred = pred  #FIXME: validate ops
     self.ty   = ty
     self.x    = arg1
     self.y    = arg2
@@ -368,6 +385,22 @@ class WidthCnxp(FunCnxp):
 class ZExtCnxp(FunCnxp):
   arity = 1
   code = 'zext'
+
+class FPtoSICnxp(FunCnxp):
+  arity = 1
+  code  = 'fptosi'
+
+class FPtoUICnxp(FunCnxp):
+  arity = 1
+  code  = 'fptoui'
+
+class SItoFPCnxp(FunCnxp):
+  arity = 1
+  code  = 'sitofp'
+
+class UItoFPCnxp(FunCnxp):
+  arity = 1
+  code  = 'uitofp'
 
 # Predicates
 # ----------
@@ -570,7 +603,7 @@ def _int_pred(self, term):
 class BaseTypeConstraints(Visitor):
   def Input(self, term):
     if term.name[0] == 'C':
-      self.integer(term)
+      self.number(term)
     else:
       self.first_class(term)
 
@@ -607,9 +640,39 @@ class BaseTypeConstraints(Visitor):
     self.specific(term, term.ty)
     self.specific(term.arg, term.src_ty)
 
+  def FPtoSIInst(self, term):
+    self.integer(term)
+    self.float(term.arg)
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+
+  def FPtoUIInst(self, term):
+    self.integer(term)
+    self.float(term.arg)
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+
+  def SItoFPInst(self, term):
+    self.float(term)
+    self.integer(term.arg)
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+
+  def UItoFPInst(self, term):
+    self.float(term)
+    self.integer(term.arg)
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+
   def IcmpInst(self, term):
     self.bool(term)
     self.int_ptr_vec(term.x)
+    self.specific(term.x, term.ty)
+    self.eq_types(term.x, term.y)
+
+  def FcmpInst(self, term):
+    self.bool(term)
+    self.float(term.x)
     self.specific(term.x, term.ty)
     self.eq_types(term.x, term.y)
 
@@ -621,6 +684,7 @@ class BaseTypeConstraints(Visitor):
     self.eq_types(term, term.arg1, term.arg2)
 
   def Literal(self, term):
+    # TODO: figure out how to make literals int/float polymorphic
     self.integer(term)
 
     x = term.val
@@ -637,15 +701,23 @@ class BaseTypeConstraints(Visitor):
     self.specific(term, term.ty)
 
   def BinaryCnxp(self, term):
-    self.integer(term)
+    # FIXME
+    if isinstance(term, (AddCnxp, SubCnxp, MulCnxp, SDivCnxp, SRemCnxp)):
+      self.number(term)
+    else:
+      self.integer(term)
     self.eq_types(term, term.x, term.y)
-  
-  def UnaryCnxp(self, term):
+
+  def NegCnxp(self, term):
+    self.number(term)
+    self.eq_types(term, term.x)
+
+  def NotCnxp(self, term):
     self.integer(term)
     self.eq_types(term, term.x)
 
   def AbsCnxp(self, term):
-    self.integer(term)
+    self.number(term)
     self.eq_types(term, term._args[0])
 
   def SignBitsCnxp(self, term):
@@ -693,10 +765,28 @@ class BaseTypeConstraints(Visitor):
   def TruncCnxp(self, term):
     self.width_ceiling(term, term._args[0])
 
+  def FPtoSICnxp(self, term):
+    self.float(term._args[0])
+    self.integer(term)
+
+  def FPtoUICnxp(self, term):
+    self.float(term._args[0])
+    self.integer(term)
+
+  def SItoFPCnxp(self, term):
+    self.integer(term._args[0])
+    self.float(term)
+
+  def UItoFPCnxp(self, term):
+    self.integer(term._args[0])
+    self.float(term)
+
   def WidthCnxp(self, term):
     self.integer(term)
     self.integer(term._args[0])
     # NOTE: return type of width may be too small to hold value
+    # NOTE: should we allow width of pointers?
+    # NOTE: should we allow width() to return fp?
 
   def AndPred(self, term):
     for p in term.clauses:
@@ -710,7 +800,13 @@ class BaseTypeConstraints(Visitor):
     term.p.accept(self)
 
   def Comparison(self, term):
-    self.integer(term.x)
+    # FIXME
+    if term.op[0] == 'u':
+      self.integer(term.x)
+      # unsigned comparisons are integer-only
+      # note that ugt could also be unordered greater-than
+    else:
+      self.number(term.x)
     self.eq_types(term.x, term.y)
 
   IntMinPred = _int_monad

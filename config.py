@@ -46,13 +46,12 @@ logs = {
   
   'root': {
     'level': 'WARNING',
-    'handlers': ['default']
+    'handlers': ['default', 'warnings']
   },
   
   'loggers': {
-#      'typing': { 'level': 'DEBUG' },
-#     'smtinterp': {
-#       'level': 'WARNING',
-#     }
+#     'typing': { 'level': 'DEBUG' },
+#     'transform': { 'level': 'DEBUG' },
+#     'smtinterp': { 'level': 'DEBUG'},
   }
 }

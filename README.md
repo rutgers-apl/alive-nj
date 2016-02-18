@@ -22,3 +22,24 @@ Z3 can be obtained from https://github.com/Z3Prover/z3
 
 Alive-NJ reads from standard input if no arguments are given.
 
+## Differences from Alive
+
+Alive-NJ adds these features:
+
+* Support for floating-point
+    * half, float, and double types
+    * Instructions: `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fcmp`,
+      `fptosi`, `fptoui`, `sitofp`, `uitofp`
+    * Symbolic constants, integer literals, and expressions using `+`, `-`,
+      `*`, `/`, and `%` may be integer or floating point
+    * Floating-point literals
+* Full replaceability of `undef`: If `%x` is `undef`, then `xor %x, %x` is
+  `undef`
+
+Alive-NJ does not include, or does not fully implement, these features:
+
+* C++ code generation
+* Flag inference
+* Memory operations (`alloca`, `store`, `load`, `getelementpointer`)
+* Pointer types
+* Composition of optimizations and non-termination checking
