@@ -166,6 +166,7 @@ class Formatter(Visitor):
     return str(term.val)
 
   def FLiteral(self, term):
+    if term.val == 'nz': return '-0.0'
     return str(term.val)
 
   def UndefValue(self, term):

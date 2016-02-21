@@ -40,6 +40,11 @@ def _mk_fp_bop(op):
       self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
         z3.Not(z3.fpIsInfinite(op(x,y))))
 
+    if 'nsz' in term.flags:
+      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
+      self.add_defs(z3.Not(x == nz), z3.Not(y == nz))
+      return op(x,y) + 0  # turns -0 to +0
+
     return op(x,y)
 
   return bop
@@ -353,6 +358,9 @@ class SMTTranslator(Visitor):
   def FLiteral(self, term):
     ty = self.type(term)
     assert isinstance(ty, FloatType)
+
+    if term.val == 'nz':
+      return z3.fpMinusZero(_ty_sort(ty))
 
     return z3.FPVal(term.val, _ty_sort(ty))
 
@@ -720,10 +728,9 @@ def check_refinement_at(type_model, src, tgt, pre=None):
     return RefinementError(RefinementError.POISON,
       s.model(), type_model, src, sv, tv, ids)
   
-  if isinstance(type_model[src], FloatType):
-    expr = sd + sp + [sv != tv, z3.Not(z3.And(z3.fpIsNaN(sv), z3.fpIsNaN(tv)))]
-  else:
-    expr = sd + sp + [sv != tv]
+  expr = sd + sp + [z3.Not(sv == tv)]
+    # for floats, != uses fpNEQ, but == uses AST equivalence instead
+    # of fpEQ. So NaN == NaN and not 0.0 == -0.0.
 
   if qvars:
     expr = z3.ForAll(qvars, z3.And(expr))

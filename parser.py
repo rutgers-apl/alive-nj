@@ -66,7 +66,10 @@ class LiteralAst(ValAst):
     # NOTE: do anything with the type?
     tok = self.toks[0]
     if '.' in tok:
-      return L.FLiteral(float(tok))
+      x = float(tok)
+      if x == 0.0 and tok[0] == '-':
+        x = 'nz'
+      return L.FLiteral(x)
     return L.Literal(int(tok))
 
 class LitWordAst(ValAst):
@@ -474,7 +477,7 @@ def opCode(codes):
 #   return oneOf(' '.join(codes))('code').setParseAction(traceParseAction(pa)).setDebug()
   return ident('code').setParseAction(pa, callDuringTry=True)
 
-flags = Group(ZeroOrMore(locatedExpr(oneOf('nsw nuw exact nnan ninf'))))
+flags = Group(ZeroOrMore(locatedExpr(oneOf('nsw nuw exact nnan ninf nsz arcp fast'))))
 
 binOp = (opCode(bin_insts) - flags('flags') - opt_ty('ty') - operand('x') - comma
       - operand('y')).setParseAction(BinOpAst)
