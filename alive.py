@@ -67,7 +67,10 @@ def main():
         valid = check_opt(opt, chatty)
       except typing.Error, e:
         print 'ERROR:', e
-        exit(-1)
+        if args.persist:
+          valid = False
+        else:
+          exit(-1)
 
       if not valid:
         failed += 1
