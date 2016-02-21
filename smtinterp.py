@@ -684,6 +684,7 @@ def _get_inputs(term):
       yield t
 
 def check_refinement_at(type_model, src, tgt, pre=None):
+  log = logger.getChild('refinement')
   smt = SMTTranslator(type_model)
   
   sv,sd,sp,qvars = smt(src)
@@ -706,10 +707,10 @@ def check_refinement_at(type_model, src, tgt, pre=None):
 
   s = z3.Solver()
   s.add(expr)
-  logger.debug('undef check\n%s', s)
+  log.debug('undef check\n%s', s)
   if s.check() != z3.unsat:
     m = s.model()
-    logger.debug('counterexample: %s', m)
+    log.debug('counterexample: %s', m)
     ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
     return RefinementError(RefinementError.UB,
       m, type_model, src, sv, tv, ids)
@@ -720,10 +721,10 @@ def check_refinement_at(type_model, src, tgt, pre=None):
 
   s = z3.Solver()
   s.add(expr)
-  logger.debug('poison check\n%s', s)
+  log.debug('poison check\n%s', s)
   if s.check() != z3.unsat:
     m = s.model()
-    logger.debug('counterexample: %s', m)
+    log.debug('counterexample: %s', m)
     ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
     return RefinementError(RefinementError.POISON,
       s.model(), type_model, src, sv, tv, ids)
@@ -737,14 +738,15 @@ def check_refinement_at(type_model, src, tgt, pre=None):
   
   s = z3.Solver()
   s.add(expr)
-  logger.debug('equality check\n%s', s)
+  log.debug('equality check\n%s', s)
   if s.check() != z3.unsat:
     m = s.model()
-    logger.debug('counterexample: %s', m)
+    log.debug('counterexample: %s', m)
     ids = [(i, smt.eval(i)) for i in _get_inputs(src)]
     return RefinementError(RefinementError.UNEQUAL,
       s.model(), type_model, src, sv, tv, ids)
 
+  log.debug('success')
   return None
 
 

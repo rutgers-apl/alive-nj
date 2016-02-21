@@ -53,5 +53,6 @@ logs = {
 #     'typing': { 'level': 'DEBUG' },
 #     'transform': { 'level': 'DEBUG' },
 #     'smtinterp': { 'level': 'DEBUG'},
+#     'smtinterp.refinement': { 'level': 'DEBUG'},
   }
 }

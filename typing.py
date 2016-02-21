@@ -109,7 +109,6 @@ class TypeConstraints(BaseTypeConstraints):
     if r not in self.specifics:
       self.specifics[r] = ty
     if self.specifics[r] != ty:
-      logger.error('Specified %s and %s for %s', ty, self.specifics[r], term)
       raise Error('Incompatible types for {}: {} and {}'.format(
         term.name if hasattr(term, 'name') else str(term),
         ty,
