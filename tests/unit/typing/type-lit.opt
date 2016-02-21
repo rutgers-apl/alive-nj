@@ -1,0 +1,4 @@
+; ERROR: Incompatible constraints for %a
+%a = add i8 %b, 1024
+=>
+%a = undef

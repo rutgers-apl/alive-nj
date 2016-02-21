@@ -1,0 +1,4 @@
+; ERROR: Incompatible types for %a
+%a = select %c, i2 %x, i3 %y
+=>
+%a = undef

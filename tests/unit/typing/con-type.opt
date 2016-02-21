@@ -1,0 +1,5 @@
+; ERROR: Incompatible constraints for %a
+%c = select %z, i8 %x, %y
+%a = fadd %b, %c
+=>
+%a = undef

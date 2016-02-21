@@ -2,6 +2,7 @@
 
 import logging, logging.config, argparse, sys
 import config
+import typing
 from parser import parse_opt_file
 
 def check_opt(opt, chatty=True):
@@ -26,6 +27,9 @@ def check_opt(opt, chatty=True):
       sys.stdout.write('\rDone: ' + str(proofs))
       sys.stdout.flush()
   
+  if proofs == 0:
+    raise typing.Error('Unsatisfiable type constraints')
+
   if chatty:
     print '\nOptimization is correct'
 
@@ -59,7 +63,13 @@ def main():
     
     for opt in opts:
       tested += 1
-      if not check_opt(opt, chatty):
+      try:
+        valid = check_opt(opt, chatty)
+      except typing.Error, e:
+        print 'ERROR:', e
+        exit(-1)
+
+      if not valid:
         failed += 1
         if not args.persist:
           exit(-1)

@@ -1,0 +1,5 @@
+; ERROR: Incompatible constraints for %y
+%x = add %a, %b
+%y = fadd %x, %c
+=>
+%y = 0

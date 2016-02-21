@@ -1,0 +1,5 @@
+; ERROR: Incompatible constraints for %y: circular
+%y = sext %x
+%z = %y
+=>
+%z = %x

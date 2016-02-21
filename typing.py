@@ -3,15 +3,12 @@ Apply typing constraints to the IR.
 '''
 
 from language import *
-import disjoint, logging, collections, z3, pretty
-import itertools
+import disjoint, pretty
+import logging, itertools
 
 logger = logging.getLogger(__name__)
 
 FIRST_CLASS, NUMBER, FLOAT, INT_PTR, PTR, INT, BOOL, Last = range(8)
-
-class IncompatibleConstraints(Exception):
-  pass
 
 
 def most_specific(c1,c2):
@@ -20,120 +17,45 @@ def most_specific(c1,c2):
 
   if c1 == NUMBER:
     if c2 == PTR:
-      raise IncompatibleConstraints 
+      return None
 
     if c2 == INT_PTR:
       return INT
 
   if c1 == FLOAT and c2 != FLOAT:
-    raise IncompatibleConstraints
+    return None
 
   if c1 == PTR and c2 != PTR:
-    raise IncompatibleConstraints
-  
+    return None
+
   return c2
 
 
+_constraint_name = {
+  FIRST_CLASS: 'first class',
+  NUMBER:      'integer or floating-point',
+  FLOAT:       'floating-point',
+  INT_PTR:     'integer or pointer',
+  PTR:         'pointer',
+  INT:         'integer',
+  BOOL:        'i1',
+}
+
+_constraint_class = {
+  FIRST_CLASS: (IntType, FloatType, PtrType),
+  NUMBER:      (IntType, FloatType),
+  FLOAT:       FloatType,
+  INT_PTR:     (IntType, PtrType),
+  PTR:         PtrType,
+  INT:         IntType,
+}
+
 def meets_constraint(con, ty):
-  if con == FIRST_CLASS:
-    return isinstance(ty, (IntType, FloatType, PtrType))
-  if con == NUMBER:
-    return isinstance(ty, (IntType, FloatType))
-  if con == FLOAT:
-    return isinstance(ty, FloatType)
-  if con == INT_PTR:
-    return isinstance(ty, (IntType, PtrType))
-  if con == PTR:
-    return isinstance(ty, PtrType)
-  if con == INT:
-    return isinstance(ty, IntType)
   if con == BOOL:
     return ty == IntType(1)
-
-  assert False
-
-FloatTy = z3.Datatype('FloatTy')
-FloatTy.declare('half')
-FloatTy.declare('single')
-FloatTy.declare('double')
-FloatTy = FloatTy.create()
-
-TySort = z3.Datatype('Ty')
-TySort.declare('integer', ('width', z3.IntSort()))
-TySort.declare('pointer')
-TySort.declare('float', ('float_ty', FloatTy))
-TySort = TySort.create()
-
-
-def translate_ty(ty):
-  'Translate an internal type to Z3'
   
-  if isinstance(ty, IntType):
-    return TySort.integer(ty.width)
+  return isinstance(ty, _constraint_class[con])
 
-  if isinstance(ty, HalfType):
-    return TySort.float(FloatTy.half)
-
-  if isinstance(ty, SingleType):
-    return TySort.float(FloatTy.single)
-
-  if isinstance(ty, DoubleType):
-    return TySort.float(FloatTy.double)
-
-  if isinstance(ty, PtrType):
-    return TySort.pointer
-  
-  assert False # TODO: raise something here
-
-def ty_from_z3(z3_ty):
-  'Translate a Z3 TySort into an Alive Type'
-
-  if z3_ty.decl().eq(TySort.integer):
-    return IntType(z3_ty.arg(0).as_long())
-
-  if z3_ty.decl().eq(TySort.float):
-    fty = z3_ty.arg(0)
-    if fty.eq(FloatTy.half):
-      return HalfType()
-    if fty.eq(FloatTy.single):
-      return SingleType()
-    if fty.eq(FloatTy.double):
-      return DoubleType()
-
-  if z3_ty.eq(TySort.pointer):
-    return PtrType()
-  assert False
-
-def z3_constraints(con, var, maxwidth=64, depth=1):
-  if con == FIRST_CLASS:
-    return z3.Or(
-      z3_constraints(PTR, var, maxwidth, depth),
-      z3_constraints(INT, var, maxwidth, depth),
-      z3_constraints(FLOAT, var, maxwidth, depth),
-    )
-
-  if con == FLOAT:
-    return TySort.is_float(var)
-
-  if con == INT_PTR:
-    return z3.Or(
-      z3_constraints(PTR, var, maxwidth, depth),
-      z3_constraints(INT, var, maxwidth, depth),
-    )
-
-  if con == PTR:
-    return TySort.is_pointer(var)
-
-  if con == INT:
-    return z3.And(
-      TySort.is_integer(var),
-      TySort.width(var) > 0,
-      TySort.width(var) <= maxwidth
-    )
-
-  if con == BOOL:
-    return var == TySort.integer(1)
-    
 
 
 class TypeConstraints(BaseTypeConstraints):
@@ -188,15 +110,25 @@ class TypeConstraints(BaseTypeConstraints):
       self.specifics[r] = ty
     if self.specifics[r] != ty:
       logger.error('Specified %s and %s for %s', ty, self.specifics[r], term)
-      raise IncompatibleConstraints
+      raise Error('Incompatible types for {}: {} and {}'.format(
+        term.name if hasattr(term, 'name') else str(term),
+        ty,
+        self.specifics[term]))
   
   def constrain(self, term, con):
     self.ensure(term)
     r = self.sets.rep(term)
-    con0 = self.constraints.get(r,FIRST_CLASS)
+    con0 = self.constraints.get(r, FIRST_CLASS)
 
     logger.debug('Refining constraint for %s: %s & %s', term, con, con0)
-    self.constraints[r] = most_specific(con0, con)
+    c = most_specific(con0, con)
+    if c is None:
+      raise Error('Incompatible constraints for {}: {} and {}'.format(
+        term.name if hasattr(term, 'name') else str(term),
+        _constraint_name[con],
+        _constraint_name[con0]))
+
+    self.constraints[r] = c
 
   def integer(self, term):
     self.constrain(term, INT)
@@ -231,9 +163,13 @@ class TypeConstraints(BaseTypeConstraints):
     for r in self.specifics:
       if r not in self.constraints:
         continue
-      
+
       if not meets_constraint(self.constraints[r], self.specifics[r]):
-        raise IncompatibleConstraints
+        raise Error('Incompatible constraints for {}: {} is not {}'.format(
+          r.name if hasattr(term, 'name') else str(r),
+          self.specifics[r],
+          _constraint_name[self.constraints[r]]))
+
 
   def simplify_orderings(self):
     if logger.isEnabledFor(logging.DEBUG):
@@ -248,58 +184,6 @@ class TypeConstraints(BaseTypeConstraints):
         pretty.pformat(ords, indent=2))
 
     self.ordering = ords
-
-
-  def z3_solver(self, maxwidth=64, depth=0):
-    self.simplify_orderings()
-    s = z3.Solver()
-    # this stops working if we use SolverFor('QF_LIA') for unclear reasons
-    
-    vars = {}
-    var = 0
-    for r in self.sets.reps():
-      var += 1
-      vars[r] = z3.Const('v_' + str(var), TySort)
-      
-      if r in self.constraints:
-        s.add(z3_constraints(self.constraints[r], vars[r], maxwidth, depth))
-      
-      if r in self.specifics:
-        s.add(vars[r] == translate_ty(self.specifics[r]))
-
-    for (lo,hi) in self.ordering:
-      if isinstance(lo, int):
-        s.add(lo < TySort.width(vars[hi]))
-      else:
-        s.add(TySort.width(vars[lo]) < TySort.width(vars[hi]))
-    
-    return s, vars
-
-  def z3_models(self, maxwidth=64, depth=0):
-    s, vars = self.z3_solver(maxwidth, depth)
-    
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.debug('solver\n%s', s)
-      logger.debug('vars\n  %s', pretty.pformat(vars, indent=2))
-
-    if s.check() != z3.sat:
-      raise IncompatibleConstraints
-
-    nonfixed = [v for r,v in vars.iteritems()
-                  if r not in self.specifics and
-                     self.constraints.get(r, FIRST_CLASS) != BOOL]
-
-    while s.check() == z3.sat:
-      model = s.model()
-      logger.debug('solution\n%s', model)
-
-      ty_model = { r: ty_from_z3(model[v]) for (r,v) in vars.iteritems() }
-      yield TypeModel(self.sets, ty_model)
-
-      s.add(z3.Or([v != model[v] for v in nonfixed]))
-      logger.debug('solver %s', s)
-
-    logger.debug('No solution')
 
   def type_models(self):
     logger.debug('generating models')
@@ -316,14 +200,28 @@ class TypeConstraints(BaseTypeConstraints):
     for r,ty in self.specifics.iteritems():
       if r in self.constraints and not \
           meets_constraint(self.constraints[r], ty):
-        raise IncompatibleConstraints
+        raise Error('Incompatible constraints for {}: {} is not {}'.format(
+          r.name if hasattr(r, 'name') else str(r),
+          self.specifics[r],
+          _constraint_name[self.constraints[r]]))
+
       model[r] = ty
 
     for lo,hi in self.ordering:
+      if lo == hi:
+        raise Error('Incompatible constraints for {}: circular ordering'.format(
+          lo.name if hasattr(lo, 'name') else str(lo)))
       if lo in model and hi in model and model[lo].width >= model[hi].width:
-        raise IncompatibleConstraints
+        raise Error('Incompatible constraints for {} and {}: {} < {}'.format(
+          lo.name if hasattr(lo, 'name') else str(lo),
+          hi.name if hasattr(hi, 'name') else str(hi),
+          model[lo],
+          model[hi]))
       if isinstance(lo, int) and hi in model and lo >= model[hi].width:
-        raise IncompatibleConstraints
+        raise Error('Incompatible constraints for {}: {} < {}'.format(
+          hi.name if hasattr(hi, 'name') else str(hi),
+          IntType(lo),
+          model[hi]))
 
     vars = tuple(r for r in self.sets.reps() if r not in self.specifics)
     if logger.isEnabledFor(logging.DEBUG):
@@ -401,3 +299,6 @@ class TypeModel(object):
 
   def __getitem__(self, key):
     return self.model[self.sets.rep(key)]
+
+class Error(Exception):
+  pass

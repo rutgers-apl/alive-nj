@@ -1,0 +1,5 @@
+; ERROR: Unsatisfiable type constraints
+%y = sext %x
+%z = sext %y
+=>
+%z = %x

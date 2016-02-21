@@ -22,11 +22,20 @@ class IntType(Type):
   def __repr__(self):
     return 'IntType({0!r})'.format(self.width)
 
+  def __str__(self):
+    return 'i' + str(self.width)
+
   def __hash__(self):
     return hash(type(self)) ^ hash(self.width)
 
   def __eq__(self, other):
     return type(other) is IntType and self.width == other.width
+
+  def __gt__(self, other):
+    if isinstance(other, int):
+      return self.width > other
+
+    return type(other) is IntType and self.width > other.width
 
 class PtrType(Type):
   __slots__ = ()
@@ -52,14 +61,19 @@ class HalfType(FloatType):
   exp = 5
   frac = 11
 
+  def __str__(self): return 'half'
+
 class SingleType(FloatType):
   exp = 8
   frac = 24
+
+  def __str__(self): return 'float'
 
 class DoubleType(FloatType):
   exp = 11
   frac = 53
 
+  def __str__(self): return 'double'
 
 
 # DAG Nodes

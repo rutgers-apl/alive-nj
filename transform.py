@@ -130,27 +130,12 @@ class Formatter(Visitor):
     return name
 
   def operand(self, term, ty = None):
-    ty = self.ty(ty)      
-    if ty: ty = ty + ' '
+    ty = str(ty) + ' ' if ty else ''
 
     if isinstance(term, Instruction):
       return ty + self.name(term)
 
     return ty + term.accept(self)
-
-  def ty(self, ty):
-    if ty is None:
-      return ''
-    if isinstance(ty, IntType):
-      return 'i' + str(ty.width)
-    if isinstance(ty, HalfType):
-      return 'half'
-    if isinstance(ty, SingleType):
-      return 'float'
-    if isinstance(ty, DoubleType):
-      return 'double'
-
-    assert False
 
   def Node(self, term):
     return '<>'
@@ -166,7 +151,7 @@ class Formatter(Visitor):
   def ConversionInst(self, term):
     return self.name(term) + ' = ' + term.code + ' ' + \
       self.operand(term.arg, term.src_ty) + \
-      (' to ' + self.ty(term.ty) if term.ty else '')
+      (' to ' + str(term.ty) if term.ty else '')
 
   def IcmpInst(self, term):
     return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
