@@ -12,6 +12,12 @@ quiet = False
 # allow poison->undefined behavior
 poison_undef = True
 
+# benchmark directory (if None, no benchmarks will be printed)
+bench_dir = None
+
+# output benchmark if solve time exceeds this threshold (in seconds)
+bench_threshold = 0.0
+
 # logging configuration. see logging.config docs for schema
 logs = {
   'version': 1,

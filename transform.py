@@ -4,7 +4,6 @@ General object representing transformations (optimizations).
 
 from language import *
 from typing import TypeConstraints
-from smtinterp import check_refinement_at
 import logging, pretty
 
 logger = logging.getLogger(__name__)
@@ -44,13 +43,6 @@ class Transform(object):
 
   def type_models(self):
     return self.type_constraints().type_models()
-
-  def check_refinement(self, model):
-    logger.info('%s: Checking refinement', self.name)
-    r = check_refinement_at(model, self.src, self.tgt, self.pre)
-    if r:
-      logger.info('Check failed %r', r)
-      return r
 
   def format(self):
     s = ''

@@ -3,6 +3,7 @@
 import logging, logging.config, argparse, sys
 import config
 import typing
+from refinement import check_refinement
 from parser import parse_opt_file
 
 def check_opt(opt, chatty=True):
@@ -13,9 +14,8 @@ def check_opt(opt, chatty=True):
   
   proofs = 0
   for m in opt.type_models():
-    r = opt.check_refinement(m)
+    r = check_refinement(opt,m)
     if r:
-#       logging.warning('Optimization %r incorrect: %s', opt.name, r)
       if chatty:
         print
         r.write()
@@ -54,6 +54,11 @@ def main():
   chatty = not args.quiet
   tested = 0
   failed = 0
+
+  if config.bench_dir:
+    if not os.path.isdir(config.bench_dir):
+      print 'Benchmark directory', config.bench_dir, 'does not exist'
+      exit(-1)
 
   for f in args.file:
     if f.isatty():

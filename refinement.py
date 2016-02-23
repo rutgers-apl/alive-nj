@@ -1,0 +1,188 @@
+'''
+Refinement checking for optimizations.
+'''
+
+import config
+import smtinterp
+import z3
+import glob
+import logging
+import time
+from language import *
+
+logger = logging.getLogger(__name__)
+
+def check_refinement(opt, type_model):
+  logger.debug('Checking refinement of %s', opt.name)
+
+  smt = smtinterp.SMTTranslator(type_model)
+
+  sv,sd,sp,qvars = smt(opt.src)
+
+  tv,td,tp,_ = smt(opt.tgt)
+  if opt.pre:
+    pb,pd,_,_ = smt(opt.pre)
+    sd += [pb] + pd
+    # NOTE: should we require sd => pd?
+
+  if td:
+    if config.poison_undef:
+      expr = sd + sp + [z3.Not(z3.And(td))]
+    else:
+      expr = sd + [z3.Not(z3.And(td))]
+  
+    if qvars:
+      expr = z3.ForAll(qvars, z3.And(expr))
+
+    r = check_expr(RefinementError.UB, expr, opt, type_model, sv, tv)
+    if r: return r
+
+  if tp:
+    expr = sd + sp + [z3.Not(z3.And(tp))]
+    if qvars:
+      expr = z3.ForAll(qvars, z3.And(expr))
+
+    r = check_expr(RefinementError.POISON, expr, opt, type_model, sv, tv)
+    if r: return r
+
+  expr = sd + sp + [z3.Not(sv == tv)]
+    # for floats, != uses fpNEQ, but == uses AST equivalence instead
+    # of fpEQ. So NaN == NaN and not 0.0 == -0.0.
+
+  if qvars:
+    expr = z3.ForAll(qvars, z3.And(expr))
+
+  return check_expr(RefinementError.UNEQUAL, expr, opt, type_model, sv, tv)
+
+
+def check_expr(stage, expr, opt, type_model, sv, tv):
+  s = z3.Solver()
+  s.add(expr)
+  logger.debug('%s check\n%s', _stage_name[stage], s)
+
+  time0 = time.time()
+  res = s.check()
+  time1 = time.time()
+  
+  solve_time = time1 - time0
+
+  if logger.isEnabledFor(logging.DEBUG):
+    logger.debug('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
+      s.statistics())
+
+  if config.bench_dir and time >= config.bench_threshold:
+    files = glob.glob(config.bench_dir + '/*.smt2')
+    filename = '{0}/{1:03d}.smt2'.format(config.bench_dir, len(files))
+    fd = open(filename, 'w')
+    fd.write(header)
+    fd.write('; {0} check for {1!r}\n'.format(_stage_name[stage], opt.name))
+    fd.write('; time: {0} s\n\n'.format(solve_time))
+    fd.write(s.to_smt2())
+    fd.close()
+
+  if res == z3.sat:
+    m = s.model()
+    logger.debug('counterexample: %s', m)
+
+    return RefinementError(stage, m, type_model, opt.src, sv, tv)
+
+  if res == z3.unknown:
+    raise Exception('Model returned unknown: ' + s.reason_unknown())
+
+  return None
+
+
+
+def format_z3val(val):
+  if isinstance(val, z3.BitVecNumRef):
+    w = val.size()
+    u = val.as_long()
+    s = val.as_signed_long()
+
+    if u == s:
+      return '0x{1:0{0}x} ({1})'.format((w+3)/4, u)
+    return '0x{1:0{0}x} ({1}, {2})'.format((w+3)/4, u, s)
+
+  if isinstance(val, z3.FPRef):
+    return str(val)
+
+class RefinementError(object): # exception?
+  UB, POISON, UNEQUAL = range(3)
+
+  def __init__(self, cause, model, types, src, srcv, tgtv):
+    self.cause = cause
+    self.model = model
+    self.types = types
+    self.src   = src
+    self.srcv  = srcv
+    self.tgtv  = tgtv
+
+  cause_str = {
+    UB:      'Target introduces undefined behavior',
+    POISON:  'Target introduces poison',
+    UNEQUAL: 'Mismatch in values',
+    }
+
+  def write(self):
+    print 'ERROR:', self.cause_str[self.cause],
+    print 'for', self.types[self.src], self.src.name
+    print
+
+    smt = smtinterp.SMTTranslator(self.types)
+
+    vars = [v for v in subterms(self.src) if isinstance(v, (Input, Instruction))]
+    vars = vars[1:]
+
+# this bit doesn't work if the target contains explicit undef
+#     tvars = [v for v in subterms(self.tgt) if isinstance(v, Instruction)]
+#     tvars = tvars[1:]
+#     tvars.extend(vars)
+#     vars = tvars
+
+    # calling eval on all the subterms of self.src is O(n^2), but
+    # we only do this for error messages and n is typically small
+    # so it probably doesn't matter
+    ty_width = 1
+    name_width = 1
+    rows = []
+    for v in vars:
+      ty = str(self.types[v])
+      name = v.name
+      rows.append((ty,name, format_z3val(self.model.evaluate(smt.eval(v), True))))
+        # it shouldn't matter that these will get new qvars,
+        # because those will just get defaulted anyway
+      if len(ty) > ty_width: ty_width = len(ty)
+      if len(name) > name_width: name_width = len(name)
+
+    print 'Example:'
+    for ty,name,val in reversed(rows):
+      print '{0:>{1}} {2:{3}} = {4}'.format(ty,ty_width,name,name_width,val)
+
+    src_v = self.model.evaluate(self.srcv, True)
+    print 'source:', format_z3val(src_v)
+
+    if self.cause == self.UB:
+      print 'target: undefined'
+    elif self.cause == self.POISON:
+      print 'target: poison'
+    else:
+      tgt_v = self.model.evaluate(self.tgtv, True)
+      print 'target:', format_z3val(tgt_v)
+
+def _get_inputs(term):
+  for t in subterms(term):
+    if isinstance(t, Input):
+      yield t
+
+_stage_name = {
+  RefinementError.UB: 'undefined behavior',
+  RefinementError.POISON: 'poison',
+  RefinementError.UNEQUAL: 'equality',
+}
+
+header = '''(set-info :source |
+ Generated by Alive-NJ
+ More info in N. P. Lopes, D. Menendez, S. Nagarakatte, J. Regehr.
+ Provably Correct Peephole Optimizations with Alive. In PLDI'15.
+|)
+'''
