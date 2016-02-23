@@ -317,7 +317,7 @@ class SMTTranslator(Visitor):
     x = self.eval(term.x)
     y = self.eval(term.y)
 
-    def unordered(f):
+    def unordered(op):
       return lambda x,y: z3.Or(op(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
 
     cmp = {
