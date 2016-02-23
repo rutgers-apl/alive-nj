@@ -70,7 +70,7 @@ def check_expr(stage, expr, opt, type_model, sv, tv):
     logger.debug('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
       s.statistics())
 
-  if config.bench_dir and time >= config.bench_threshold:
+  if config.bench_dir and solve_time >= config.bench_threshold:
     files = glob.glob(config.bench_dir + '/*.smt2')
     filename = '{0}/{1:03d}.smt2'.format(config.bench_dir, len(files))
     fd = open(filename, 'w')

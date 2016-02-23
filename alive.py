@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import logging, logging.config, argparse, sys
+import os.path
 import config
 import typing
 from refinement import check_refinement
