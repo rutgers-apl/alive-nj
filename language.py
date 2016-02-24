@@ -51,6 +51,8 @@ class PtrType(Type):
     return 'PtrType()'
 
 class FloatType(Type):
+  __slots__ = ()
+
   def __repr__(self):
     return type(self).__name__ + '()'
 
@@ -58,18 +60,21 @@ class FloatType(Type):
     return type(other) is type(self)
 
 class HalfType(FloatType):
+  __slots__ = ()
   exp = 5
   frac = 11
 
   def __str__(self): return 'half'
 
 class SingleType(FloatType):
+  __slots__ = ()
   exp = 8
   frac = 24
 
   def __str__(self): return 'float'
 
 class DoubleType(FloatType):
+  __slots__ = ()
   exp = 11
   frac = 53
 
@@ -83,8 +88,8 @@ class MetaNode(type):
   'Automatically generate a superclass table for Node classes'
 
   def __new__(cls, name, bases, dict):
-    if '__slots__' not in dict and hasattr(bases[0], '__slots__'):
-      dict['__slots__'] = bases[0].__slots__
+    if '__slots__' not in dict:
+      dict['__slots__'] = ()
 
     return super(MetaNode, cls).__new__(cls, name, bases, dict)
 
@@ -98,19 +103,21 @@ class MetaNode(type):
       assert cls.code not in cls.codes
       cls.codes[cls.code] = cls
 
+    if '__slots__' in dict:
+      cls._allslots = getattr(cls, '_allslots', ()) + tuple(dict['__slots__'])
+
     return super(MetaNode, cls).__init__(cls, bases, dict)
 
 class Node(object):
   __metaclass__ = MetaNode
-  __slots__ = ()
-  
+
   def accept(self, visitor, *args, **kws):
     return getattr(visitor, type(self).__name__)(self, *args, **kws)
     # makes the stack trace slightly ugly, but saves a bunch of typing
 
   def pretty(self):
     return pretty.group(type(self).__name__, '(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(getattr(self,s)) for s in self.__slots__),
+      (',' + pretty.line).join(pretty.prepr(getattr(self,s)) for s in self._allslots),
       ')').nest(2)
 
   def __repr__(self):
