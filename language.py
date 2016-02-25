@@ -106,7 +106,7 @@ class MetaNode(type):
     if '__slots__' in dict:
       cls._allslots = getattr(cls, '_allslots', ()) + tuple(dict['__slots__'])
 
-    return super(MetaNode, cls).__init__(cls, bases, dict)
+    return super(MetaNode, cls).__init__(name, bases, dict)
 
 class Node(object):
   __metaclass__ = MetaNode
