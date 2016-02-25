@@ -2,7 +2,45 @@
 Extra functions for dealing with Z3 BitVecs.
 '''
 
+__all__ = ('mk_and', 'mk_or', 'mk_not', 'mk_forall', 'bool_to_BitVec',
+           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits')
+
 import z3
+
+def mk_and(clauses):
+  'mk_and([p,q,r]) -> And(p,q,r)'
+  if len(clauses) == 1:
+    return clauses[0]
+  if len(clauses) == 0:
+    return z3.BoolVal(True)
+
+  return z3.And(clauses)
+
+def mk_or(clauses):
+  'mk_or([p,q,r]) -> Or(p,q,r)'
+  if len(clauses) == 1:
+    return clauses[0]
+  if len(clauses) == 0:
+    return z3.BoolVal(False)
+
+  return z3.Or(clauses)
+
+def mk_not(clauses):
+  'mk_not([p,q,r]) -> Not(And(p,q,r))'
+  if len(clauses) == 1:
+    return z3.Not(clauses[0])
+  if len(clauses) == 0:
+    return z3.BoolVal(False)
+
+  return z3.Not(z3.And(clauses))
+
+def mk_forall(qvars, clauses):
+  'mk_forall(vs, [p,q,r]) -> ForAll(vs, And(p,q,r))'
+  if len(qvars) == 0:
+    return mk_and(clauses)
+
+  return z3.ForAll(qvars, mk_and(clauses))
+
 
 def bool_to_BitVec(b):
   return z3.If(b, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))

@@ -547,10 +547,10 @@ class SMTTranslator(Visitor):
     # NOTE: nothing bad should happen if we don't evaluate the argument
 
   def AndPred(self, term):
-    return z3.And([self.eval(cl) for cl in term.clauses])
+    return mk_and([self.eval(cl) for cl in term.clauses])
 
   def OrPred(self, term):
-    return z3.Or([self.eval(cl) for cl in term.clauses])
+    return mk_or([self.eval(cl) for cl in term.clauses])
 
   def NotPred(self, term):
     return z3.Not(self.eval(term.p))
@@ -667,6 +667,6 @@ class FastMathUndef(SMTTranslator):
       q = self.fresh_var(self.type(term))
       self.add_qvar(q)
 
-      return z3.If(z3.And(conds), z, q)
+      return z3.If(mk_and(conds), z, q)
 
     return z

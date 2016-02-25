@@ -9,6 +9,7 @@ import glob
 import logging
 import time
 from language import *
+from z3util import mk_and, mk_not, mk_forall
 
 logger = logging.getLogger(__name__)
 
@@ -30,34 +31,20 @@ def check_refinement(opt, type_model, translator=config.translator):
 
   if td:
     if config.poison_undef:
-      expr = sd + sp + [z3.Not(z3.And(td))]
+      expr = sd + sp + [mk_not(td)]
     else:
-      expr = sd + [z3.Not(z3.And(td))]
+      expr = sd + [mk_not(td)]
 
-    if qvars:
-      expr = z3.ForAll(qvars, z3.And(expr))
-
-    m = check_expr(UB, expr, opt)
+    m = check_expr(UB, mk_forall(qvars, expr), opt)
     if m is not None:
       return RefinementError(UB, m, type_model, opt.src, sv, tv, translator)
 
   if tp:
-    expr = sd + sp + [z3.Not(z3.And(tp))]
-    if qvars:
-      expr = z3.ForAll(qvars, z3.And(expr))
-
-    m = check_expr(POISON, expr, opt)
+    m = check_expr(POISON, mk_forall(qvars, sd + sp + [mk_not(tp)]), opt)
     if m is not None:
       return RefinementError(POISON, m, type_model, opt.src, sv, tv, translator)
 
-  expr = sd + sp + [z3.Not(sv == tv)]
-    # for floats, != uses fpNEQ, but == uses AST equivalence instead
-    # of fpEQ. So NaN == NaN and not 0.0 == -0.0.
-
-  if qvars:
-    expr = z3.ForAll(qvars, z3.And(expr))
-
-  m = check_expr(UNEQUAL, expr, opt)
+  m = check_expr(UNEQUAL, mk_forall(qvars, sd + sp + [z3.Not(sv == tv)]), opt)
   if m is not None:
     return RefinementError(UNEQUAL, m, type_model, opt.src, sv, tv, translator)
 
