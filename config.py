@@ -18,6 +18,9 @@ bench_dir = None
 # output benchmark if solve time exceeds this threshold (in seconds)
 bench_threshold = 0.0
 
+# which class to use for translation to SMT (by lowercased name)
+translator = 'smttranslator'
+
 # logging configuration. see logging.config docs for schema
 logs = {
   'version': 1,
@@ -59,6 +62,6 @@ logs = {
 #     'typing': { 'level': 'DEBUG' },
 #     'transform': { 'level': 'DEBUG' },
 #     'smtinterp': { 'level': 'DEBUG'},
-#     'smtinterp.refinement': { 'level': 'DEBUG'},
+#     'refinement': { 'level': 'DEBUG'},
   }
 }

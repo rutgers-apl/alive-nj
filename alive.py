@@ -7,7 +7,7 @@ import typing
 from refinement import check_refinement
 from parser import parse_opt_file
 
-def check_opt(opt, chatty=True):
+def check_opt(opt, chatty=True, trns=config.translator):
   if chatty:
     print '----------'
     print opt.format()
@@ -15,7 +15,7 @@ def check_opt(opt, chatty=True):
   
   proofs = 0
   for m in opt.type_models():
-    r = check_refinement(opt,m)
+    r = check_refinement(opt,m,trns)
     if r:
       if chatty:
         print
@@ -46,9 +46,12 @@ def main():
   parser.add_argument('--quiet', action='store_true',
     default=config.quiet,
     help='only print number of tested and unverified opts')
+  parser.add_argument('--translator', action='store',
+    default=config.translator,
+    help='(advanced) pick class for SMT translation')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
-    help='file(s) containing Alive optimizations (stdin by default')
+    help='file(s) containing Alive optimizations (stdin by default)')
 
   args = parser.parse_args()
 
@@ -70,7 +73,7 @@ def main():
     for opt in opts:
       tested += 1
       try:
-        valid = check_opt(opt, chatty)
+        valid = check_opt(opt, chatty, args.translator)
       except typing.Error, e:
         print 'ERROR:', e
         if args.persist:

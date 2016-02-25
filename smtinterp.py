@@ -5,74 +5,60 @@ Translate expressions into SMT via Z3
 from language import *
 from z3util import *
 import z3, operator, logging
+import types
 
 
 logger = logging.getLogger(__name__)
 
-def _mk_bop(op, defined = None, poisons = None):
-  def bop(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
+class OpHandler(object):
+  '''These essentially act as closures, where the arguments can be read.
+  (And modified, so watch out.)
 
-    if defined:
-      self.add_defs(*defined(x,y))
+  To add to a class, use
 
-    if poisons:
-      for f in term.flags:
-        self.add_nops(poisons[f](x,y))
-  
-    return op(x,y)
-  
-  return bop
+    def MyClass(object):
+      field = OpHandler(op)
 
-def _mk_fp_bop(op):
-  def bop(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
+  Then, MyClass.field returns the OpHandler, and my_obj.field returns a
+  method.
 
-    if 'nnan' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)), 
-        z3.Not(z3.fpIsNaN(op(x,y))))
+  Subclasses must override __call__.
+  '''
+  def __init__(self, op):
+    self.op = op
 
-    if 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
+  def __call__(self, *args):
+    raise NotImplementedError
 
-    if 'nsz' in term.flags:
-      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-      self.add_defs(z3.Not(x == nz), z3.Not(y == nz))
-      return op(x,y) + 0  # turns -0 to +0
+  def __get__(self, obj, cls=None):
+    # return a method if invoked as obj.handler.
+    if obj:
+      return types.MethodType(self, obj, cls)
 
-    return op(x,y)
+    return self
 
-  return bop
+class BinOpHandler(OpHandler):
+  _fields = ('op', 'defined', 'poisons')
+  def __init__(self, op, defined = None, poisons = None):
+    self.op = op
+    self.poisons = poisons
+    self.defined = defined
 
-def _mk_must_analysis(op):
-  def pred(self, term):
-    x = self.eval(term._args[0])
+  def copy(self, **kws):
+    dict = {f: kws.get(f, getattr(self, f)) for f in self._fields}
+    return type(self)(**dict)
 
-    if isinstance(x, Constant):
-      return op(x)
+  def __call__(self, obj, term):
+    return obj._binary_operator(term, self.op, self.defined, self.poisons)
 
-    c = self.fresh_bool()
-    self.add_defs(z3.Implies(c, op(x)))
-    return c
+class FBinOpHandler(OpHandler):
+  def __call__(self, obj, term):
+    return obj._float_binary_operator(term, self.op)
 
-  return pred
+class MustAnalysis(OpHandler):
+  def __call__(self, obj, term):
+    return obj._must_analysis(term, self.op)
 
-def _mk_bin_must_analysis(op):
-  def bop(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
-    if all(isinstance(a, Constant) for a in term._args):
-      return op(x,y)
-
-    c = self.fresh_bool()
-    self.add_defs(z3.Implies(c, op(x,y)))
-    return c
-
-  return bop
 
 def _ty_sort(ty):
   'Translate a Type expression to a Z3 Sort'
@@ -87,7 +73,16 @@ def _ty_sort(ty):
     DoubleType: z3.Float64()}[type(ty)]
     # NOTE: this assumes the global z3 context never changes
 
+class MetaTranslator(MetaVisitor):
+  def __init__(cls, name, bases, dict):
+    if not hasattr(cls, 'registry'):
+      cls.registry = {}
+
+    cls.registry[name.lower()] = cls
+    return super(MetaTranslator, cls).__init__(name, bases, dict)
+
 class SMTTranslator(Visitor):
+  __metaclass__ = MetaTranslator
   log = logger.getChild('SMTTranslator')
 
   def __init__(self, type_model):
@@ -149,58 +144,99 @@ class SMTTranslator(Visitor):
     ty = self.types[term]
     return z3.Const(term.name, _ty_sort(ty))
 
-  AddInst = _mk_bop(operator.add,
+  def _binary_operator(self, term, op, defined, poisons):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    if defined:
+      self.add_defs(*defined(x,y))
+
+    if poisons:
+      for f in term.flags:
+        self.add_nops(poisons[f](x,y))
+
+    return op(x,y)
+
+  AddInst = BinOpHandler(operator.add,
     poisons =
       {'nsw': lambda x,y: z3.SignExt(1,x)+z3.SignExt(1,y) == z3.SignExt(1,x+y),
        'nuw': lambda x,y: z3.ZeroExt(1,x)+z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)})
 
-  SubInst = _mk_bop(operator.sub,
+  SubInst = BinOpHandler(operator.sub,
     poisons =
       {'nsw': lambda x,y: z3.SignExt(1,x)-z3.SignExt(1,y) == z3.SignExt(1,x-y),
        'nuw': lambda x,y: z3.ZeroExt(1,x)-z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)})
 
-  MulInst = _mk_bop(operator.mul,
+  MulInst = BinOpHandler(operator.mul,
     poisons =
       {'nsw': lambda x,y: z3.SignExt(x.size(),x)*z3.SignExt(x.size(),y) == z3.SignExt(x.size(),x*y),
        'nuw': lambda x,y: z3.ZeroExt(x.size(),x)*z3.ZeroExt(x.size(),y) == z3.ZeroExt(x.size(),x*y)})
 
-  SDivInst = _mk_bop(operator.div,
+  SDivInst = BinOpHandler(operator.div,
     defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)],
     poisons = {'exact': lambda x,y: (x/y)*y == x})
 
-  UDivInst = _mk_bop(z3.UDiv,
+  UDivInst = BinOpHandler(z3.UDiv,
     defined = lambda x,y: [y != 0],
     poisons = {'exact': lambda x,y: z3.UDiv(x,y)*y == x})
 
-  SRemInst = _mk_bop(z3.SRem,
+  SRemInst = BinOpHandler(z3.SRem,
     defined = lambda x,y: [y != 0, z3.Or(x != (1 << (x.size()-1)), y != -1)])
 
-  URemInst = _mk_bop(z3.URem,
+  URemInst = BinOpHandler(z3.URem,
     defined = lambda x,y: [y != 0])
   
-  ShlInst = _mk_bop(operator.lshift,
+  ShlInst = BinOpHandler(operator.lshift,
     defined = lambda x,y: [z3.ULT(y, y.size())],
     poisons =
       {'nsw': lambda x,y: (x << y) >> y == x,
        'nuw': lambda x,y: z3.LShR(x << y, y) == x})
 
-  AShrInst = _mk_bop(operator.rshift,
+  AShrInst = BinOpHandler(operator.rshift,
     defined = lambda x,y: [z3.ULT(y, y.size())],
     poisons = {'exact': lambda x,y: (x >> y) << y == x})
 
-  LShrInst = _mk_bop(z3.LShR,
+  LShrInst = BinOpHandler(z3.LShR,
     defined = lambda x,y: [z3.ULT(y, y.size())],
     poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x})
 
-  AndInst = _mk_bop(operator.and_)
-  OrInst = _mk_bop(operator.or_)
-  XorInst = _mk_bop(operator.xor)
+  AndInst = BinOpHandler(operator.and_)
+  OrInst = BinOpHandler(operator.or_)
+  XorInst = BinOpHandler(operator.xor)
 
-  FAddInst = _mk_fp_bop(operator.add)
-  FSubInst = _mk_fp_bop(operator.sub)
-  FMulInst = _mk_fp_bop(operator.mul)
-  FDivInst = _mk_fp_bop(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
-  FRemInst = _mk_fp_bop(z3.fpRem)
+
+
+  def _float_binary_operator(self, term, op):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    if 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+
+    if 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+
+    if 'nsz' in term.flags:
+      # NOTE: this will return a different qvar for each (in)direct reference
+      # to this term. Is this desirable?
+      q = self.fresh_var(self.type(term))
+      self.add_qvar(q)
+      self.add_defs(z3.fpEQ(q,0))
+      z = op(x,y)
+      return z3.If(z3.fpEQ(z,0), q, z)
+#       nz = z3.fpMinusZero(_ty_sort(self.type(term)))
+#       self.add_defs(z3.Not(x == nz), z3.Not(y == nz))
+#       return op(x,y) + 0  # turns -0 to +0
+
+    return op(x,y)
+
+  FAddInst = FBinOpHandler(operator.add)
+  FSubInst = FBinOpHandler(operator.sub)
+  FMulInst = FBinOpHandler(operator.mul)
+  FDivInst = FBinOpHandler(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
+  FRemInst = FBinOpHandler(z3.fpRem)
 
 
   # NOTE: SExt/ZExt/Trunc should all have IntType args
@@ -373,19 +409,19 @@ class SMTTranslator(Visitor):
   #       is this reasonable?
   # FIXME: cnxps need explicit undef checking
   # FIXME: div/rem by 0 is undef
-  AddCnxp = _mk_bop(operator.add)
-  SubCnxp = _mk_bop(operator.sub)
-  MulCnxp = _mk_bop(operator.mul)
-  SDivCnxp = _mk_bop(operator.div)
-  UDivCnxp = _mk_bop(z3.UDiv)
-  SRemCnxp = _mk_bop(operator.mod)
-  URemCnxp = _mk_bop(z3.URem)
-  ShlCnxp = _mk_bop(operator.lshift)
-  AShrCnxp = _mk_bop(operator.rshift)
-  LShrCnxp = _mk_bop(z3.LShR)
-  AndCnxp = _mk_bop(operator.and_)
-  OrCnxp = _mk_bop(operator.or_)
-  XorCnxp = _mk_bop(operator.xor)
+  AddCnxp = BinOpHandler(operator.add)
+  SubCnxp = BinOpHandler(operator.sub)
+  MulCnxp = BinOpHandler(operator.mul)
+  SDivCnxp = BinOpHandler(operator.div)
+  UDivCnxp = BinOpHandler(z3.UDiv)
+  SRemCnxp = BinOpHandler(operator.mod)
+  URemCnxp = BinOpHandler(z3.URem)
+  ShlCnxp = BinOpHandler(operator.lshift)
+  AShrCnxp = BinOpHandler(operator.rshift)
+  LShrCnxp = BinOpHandler(z3.LShR)
+  AndCnxp = BinOpHandler(operator.and_)
+  OrCnxp = BinOpHandler(operator.or_)
+  XorCnxp = BinOpHandler(operator.xor)
 
   def NotCnxp(self, term):
     return ~self.eval(term.x)
@@ -534,13 +570,23 @@ class SMTTranslator(Visitor):
 
     return cmp(self.eval(term.x), self.eval(term.y))
 
+  def _must_analysis(self, term, op):
+    args = (self.eval(a) for a in term._args)
+
+    if all(isinstance(a, Constant) for a in term._args):
+      return op(*args)
+
+    c = self.fresh_bool()
+    self.add_defs(z3.Implies(c, op(*args)))
+    return c
+
   def IntMinPred(self, term):
     x = self.eval(term._args[0])
 
     return x == 1 << (x.size()-1)
 
-  Power2Pred = _mk_must_analysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
-  Power2OrZPred = _mk_must_analysis(lambda x: x & (x-1) == 0)
+  Power2Pred = MustAnalysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
+  Power2OrZPred = MustAnalysis(lambda x: x & (x-1) == 0)
 
   def ShiftedMaskPred(self, term):
     x = self.eval(term._args[0])
@@ -548,18 +594,18 @@ class SMTTranslator(Visitor):
     v = (x - 1) | x
     return z3.And(v != 0, ((v+1) & v) == 0)
 
-  MaskZeroPred = _mk_bin_must_analysis(lambda x,y: x & y == 0)
+  MaskZeroPred = MustAnalysis(lambda x,y: x & y == 0)
 
-  NSWAddPred = _mk_bin_must_analysis(
+  NSWAddPred = MustAnalysis(
     lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y))
 
-  NUWAddPred = _mk_bin_must_analysis(
+  NUWAddPred = MustAnalysis(
     lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y))
 
-  NSWSubPred = _mk_bin_must_analysis(
+  NSWSubPred = MustAnalysis(
     lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y))
 
-  NUWSubPred = _mk_bin_must_analysis(
+  NUWSubPred = MustAnalysis(
     lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
 
   def NSWMulPred(self, term):
@@ -585,3 +631,42 @@ class SMTTranslator(Visitor):
   def OneUsePred(self, term):
     return z3.BoolVal(True)
     # NOTE: should this have semantics?
+
+
+class NewShlSemantics(SMTTranslator):
+  ShlInst = SMTTranslator.ShlInst.copy(poisons = {
+    'nsw': lambda a,b: z3.Or((a << b) >> b == a,
+                             z3.And(a == 1, b == b.size() - 1)),
+    'nuw': lambda a,b: z3.LShR(a << b, b) == a})
+
+class FastMathUndef(SMTTranslator):
+  def _float_binary_operator(self, term, op):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    conds = []
+    z = op(x,y)
+    if 'nnan' in term.flags:
+      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y)))]
+
+    if 'ninf' in term.flags:
+      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y)))]
+
+    if 'nsz' in term.flags:
+      # NOTE: this will return a different qvar for each (in)direct reference
+      # to this term. Is this desirable?
+      q = self.fresh_var(self.type(term))
+      self.add_qvar(q)
+      self.add_defs(z3.fpEQ(q,0))
+
+      z = z3.If(z3.fpEQ(z,0), q, z)
+
+    if conds:
+      q = self.fresh_var(self.type(term))
+      self.add_qvar(q)
+
+      return z3.If(z3.And(conds), z, q)
+
+    return z
