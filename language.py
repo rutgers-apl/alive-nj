@@ -525,6 +525,14 @@ class FunPred(Predicate):
   def args(self):
     return self._args
 
+class CannotBeNegativeZeroPred(FunPred):
+  sig  = (Value,)
+  code = 'CannotBeNegativeZero'
+
+class FPSamePred(FunPred):
+  sig  = (Constant, Constant)
+  code = 'fpsame'
+
 class IntMinPred(FunPred): 
   sig  = (Constant,)
   code = 'isSignBit'
@@ -854,6 +862,13 @@ class BaseTypeConstraints(Visitor):
     else:
       self.number(term.x)
     self.eq_types(term.x, term.y)
+
+  def CannotBeNegativeZeroPred(self, term):
+    self.float(term._args[0])
+
+  def FPSamePred (self, term):
+    self.float(term._args[0])
+    self.eq_types(*term._args)
 
   IntMinPred = _int_monad
   Power2Pred = _int_monad

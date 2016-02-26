@@ -9,7 +9,7 @@ Name: remove nsz
 %r = fadd %a, %b
 
 Name: X*0 => 0
-Pre: !(C != 0.0)
+Pre: C == 0.0
 %r = fmul nnan nsz half %x, C
 =>
 %r = C

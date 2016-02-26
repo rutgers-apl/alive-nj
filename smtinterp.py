@@ -81,6 +81,9 @@ class MetaTranslator(MetaVisitor):
     cls.registry[name.lower()] = cls
     return super(MetaTranslator, cls).__init__(name, bases, dict)
 
+def unordered(op):
+  return lambda x,y: z3.Or(op(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
+
 class SMTTranslator(Visitor):
   __metaclass__ = MetaTranslator
   log = logger.getChild('SMTTranslator')
@@ -325,50 +328,52 @@ class SMTTranslator(Visitor):
     x = z3.fpToFPUnsigned(z3.RTZ(), v, _ty_sort(tgt))
     return z3.If(z3.fpToUBV(z3.RTZ(), x, _ty_sort(src)) == v, x, q)
 
+  _icmp_ops = {
+    'eq': operator.eq,
+    'ne': operator.ne,
+    'ugt': z3.UGT,
+    'uge': z3.UGE,
+    'ult': z3.ULT,
+    'ule': z3.ULE,
+    'sgt': operator.gt,
+    'sge': operator.ge,
+    'slt': operator.lt,
+    'sle': operator.le,
+  }
+
   def IcmpInst(self, term):
     x = self.eval(term.x)
     y = self.eval(term.y)
 
-    cmp = {
-      'eq': operator.eq,
-      'ne': operator.ne,
-      'ugt': z3.UGT,
-      'uge': z3.UGE,
-      'ult': z3.ULT,
-      'ule': z3.ULE,
-      'sgt': operator.gt,
-      'sge': operator.ge,
-      'slt': operator.lt,
-      'sle': operator.le}[term.pred](x,y)
+    cmp = self._icmp_ops[term.pred](x,y)
 
     return bool_to_BitVec(cmp)
+
+  _fcmp_ops = {
+    'false': lambda x,y: z3.BoolVal(False),
+    'oeq': z3.fpEQ,
+    'ogt': z3.fpGT,
+    'oge': z3.fpGEQ,
+    'olt': z3.fpLT,
+    'ole': z3.fpLEQ,
+    'one': z3.fpNEQ,
+    'ord': lambda x,y: z3.Not(z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y))),
+    'ueq': unordered(z3.fpEQ),
+    'ugt': unordered(z3.fpGT),
+    'uge': unordered(z3.fpGEQ),
+    'ult': unordered(z3.fpLT),
+    'ule': unordered(z3.fpLEQ),
+    'une': unordered(z3.fpNEQ),
+    'uno': lambda x,y: z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y)),
+    'true': lambda x,y: z3.BoolVal(True),
+  }
 
   # TODO: fcmp flags
   def FcmpInst(self, term):
     x = self.eval(term.x)
     y = self.eval(term.y)
 
-    def unordered(op):
-      return lambda x,y: z3.Or(op(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
-
-    cmp = {
-      'false': lambda x,y: z3.BoolVal(False),
-      'oeq': z3.fpEQ,
-      'ogt': z3.fpGT,
-      'oge': z3.fpGEQ,
-      'olt': z3.fpLT,
-      'ole': z3.fpLEQ,
-      'one': z3.fpNEQ,
-      'ord': lambda x,y: z3.Not(z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y))),
-      'ueq': unordered(z3.fpEQ),
-      'ugt': unordered(z3.fpGT),
-      'uge': unordered(z3.fpGEQ),
-      'ult': unordered(z3.fpLT),
-      'ule': unordered(z3.fpLEQ),
-      'une': unordered(z3.fpNEQ),
-      'uno': lambda x,y: z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y)),
-      'true': lambda x,y: z3.BoolVal(True),
-      }[term.pred](x,y)
+    cmp = self._fcmp_ops[term.pred](x,y)
 
     return bool_to_BitVec(cmp)
 
@@ -553,17 +558,11 @@ class SMTTranslator(Visitor):
     return z3.Not(self.eval(term.p))
 
   def Comparison(self, term):
-    cmp = {
-      'eq': operator.eq,
-      'ne': operator.ne,
-      'ugt': z3.UGT,
-      'uge': z3.UGE,
-      'ult': z3.ULT,
-      'ule': z3.ULE,
-      'sgt': operator.gt,
-      'sge': operator.ge,
-      'slt': operator.lt,
-      'sle': operator.le}[term.op]
+    if term.op == 'eq' and isinstance(self.type(term.x), FloatType):
+      cmp = z3.fpEQ
+    else:
+      cmp = self._icmp_ops[term.op]
+      # only the signed ones can be FP, so this is safe
 
     return cmp(self.eval(term.x), self.eval(term.y))
 
@@ -576,6 +575,13 @@ class SMTTranslator(Visitor):
     c = self.fresh_bool()
     self.add_defs(z3.Implies(c, op(*args)))
     return c
+
+  CannotBeNegativeZeroPred = MustAnalysis(
+    lambda x: z3.Not(x == z3.fpMinusZero(x.sort())))
+    # or: z3.And(z3.Not(z3.fpIsNegative(x)), z3.Not(z3.fpIsZero(x)))
+
+  def FPSamePred(self, term):
+    return self.eval(term._args[0]) == self.eval(term._args[1])
 
   def IntMinPred(self, term):
     x = self.eval(term._args[0])
