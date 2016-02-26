@@ -1,0 +1,15 @@
+Name: keep nsz
+%r = fadd nsz half %a, %b
+=>
+%r = fadd nsz %a, %b
+
+Name: remove nsz
+%r = fadd nsz half %a, %b
+=>
+%r = fadd %a, %b
+
+Name: X*0 => 0
+Pre: !(C != 0.0)
+%r = fmul nnan nsz half %x, C
+=>
+%r = C

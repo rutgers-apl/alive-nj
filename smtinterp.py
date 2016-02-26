@@ -221,14 +221,11 @@ class SMTTranslator(Visitor):
     if 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
       # to this term. Is this desirable?
-      q = self.fresh_var(self.type(term))
-      self.add_qvar(q)
-      self.add_defs(z3.fpEQ(q,0))
+      b = self.fresh_bool()
+      self.add_qvar(b)
       z = op(x,y)
-      return z3.If(z3.fpEQ(z,0), q, z)
-#       nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-#       self.add_defs(z3.Not(x == nz), z3.Not(y == nz))
-#       return op(x,y) + 0  # turns -0 to +0
+      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
+      return z3.If(z3.fpEQ(z,0), z3.If(b, 0, nz), z)
 
     return op(x,y)
 
@@ -657,11 +654,11 @@ class FastMathUndef(SMTTranslator):
     if 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
       # to this term. Is this desirable?
-      q = self.fresh_var(self.type(term))
-      self.add_qvar(q)
-      self.add_defs(z3.fpEQ(q,0))
-
-      z = z3.If(z3.fpEQ(z,0), q, z)
+      b = self.fresh_bool()
+      self.add_qvar(b)
+      z = op(x,y)
+      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
+      z = z3.If(z3.fpEQ(z,0), z3.If(b, 0, nz), z)
 
     if conds:
       q = self.fresh_var(self.type(term))
@@ -670,3 +667,49 @@ class FastMathUndef(SMTTranslator):
       return z3.If(mk_and(conds), z, q)
 
     return z
+
+class OldNSZ(SMTTranslator):
+  def _float_binary_operator(self, term, op):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    if 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+
+    if 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+
+    if 'nsz' in term.flags:
+      # NOTE: this will return a different qvar for each (in)direct reference
+      # to this term. Is this desirable?
+      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
+      self.add_defs(z3.Not(x == nz), z3.Not(y == nz))
+      return op(x,y)  # turns -0 to +0
+
+    return op(x,y)
+
+class BrokenNSZ(SMTTranslator):
+  def _float_binary_operator(self, term, op):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    if 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+
+    if 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+
+    if 'nsz' in term.flags:
+      # NOTE: this will return a different qvar for each (in)direct reference
+      # to this term. Is this desirable?
+      q = self.fresh_var(self.type(term))
+      self.add_qvar(q)  # FIXME
+      self.add_defs(z3.fpEQ(q,0))
+      z = op(x,y)
+      return z3.If(z3.fpEQ(z,0), q, z)
+
+    return op(x,y)

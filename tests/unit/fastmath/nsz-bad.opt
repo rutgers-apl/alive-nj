@@ -1,0 +1,4 @@
+; ERROR: Mismatch in values
+%r = fadd nsz half %a, %b
+=>
+%r = 0.0
