@@ -1,0 +1,7 @@
+; ERROR: Mismatch in values
+Name: simplify:851-1
+Pre: C == 0.0
+%1 = fsub -0.0, %x
+%r = fsub C, %1
+=>
+%r = %x
