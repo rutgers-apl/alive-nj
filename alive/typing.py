@@ -2,8 +2,8 @@
 Apply typing constraints to the IR.
 '''
 
-from language import *
-import disjoint, pretty
+from .language import *
+from . import disjoint, pretty
 import logging, itertools
 import collections
 

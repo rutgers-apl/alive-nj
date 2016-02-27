@@ -2,14 +2,14 @@
 Refinement checking for optimizations.
 '''
 
-import config
-import smtinterp
+from . import config
+from . import smtinterp
 import z3
 import glob
 import logging
 import time
-from language import *
-from z3util import mk_and, mk_not, mk_forall
+from .language import *
+from .z3util import mk_and, mk_not, mk_forall
 
 logger = logging.getLogger(__name__)
 

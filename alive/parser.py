@@ -1,6 +1,6 @@
 import collections, sys
-import language as L
-from transform import Transform, Formatter
+from . import language as L
+from .transform import Transform, Formatter
 from pyparsing.pyparsing import *
 
 ParserElement.enablePackrat()

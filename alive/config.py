@@ -59,9 +59,9 @@ logs = {
   },
   
   'loggers': {
-#     'typing': { 'level': 'DEBUG' },
-#     'transform': { 'level': 'DEBUG' },
-#     'smtinterp': { 'level': 'DEBUG'},
-#     'refinement': { 'level': 'DEBUG'},
+#     'alive.typing': { 'level': 'DEBUG' },
+#     'alive.transform': { 'level': 'DEBUG' },
+#     'alive.smtinterp': { 'level': 'DEBUG'},
+#     'alive.refinement': { 'level': 'DEBUG'},
   }
 }

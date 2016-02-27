@@ -2,8 +2,8 @@
 Translate expressions into SMT via Z3
 '''
 
-from language import *
-from z3util import *
+from .language import *
+from .z3util import *
 import z3, operator, logging
 import types
 

@@ -2,7 +2,7 @@
 Defines the internal representation as nodes in a DAG.
 '''
 
-import pretty
+from . import pretty
 import itertools
 import operator
 

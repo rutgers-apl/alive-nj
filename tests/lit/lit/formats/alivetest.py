@@ -10,7 +10,7 @@ def executeCommand(command, input):
                        stdin=subprocess.PIPE,
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
-  p.stdin.write(input)
+  #p.stdin.write(input)
   out,err = p.communicate()
   exitCode = p.wait()
 
@@ -43,7 +43,7 @@ class AliveTest(FileBasedTest):
 
   def execute(self, test, litConfig):
     test = test.getSourcePath()
-    cmd = ['python', 'alive.py']
+    cmd = ['python', 'run.py', test]
     input = readFile(test)
 
     # add test-specific args

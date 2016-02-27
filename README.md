@@ -17,8 +17,8 @@ Z3 can be obtained from https://github.com/Z3Prover/z3
 
 ## Usage
 
-    ./alive.py [file [file...]]
-    ./alive.py --help
+    ./run.py [file [file...]]
+    ./run.py --help
 
 Alive-NJ reads from standard input if no arguments are given.
 
@@ -29,7 +29,7 @@ Alive-NJ adds these features:
 * Support for floating-point
     * half, float, and double types
     * Instructions: `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fcmp`,
-      `fptosi`, `fptoui`, `sitofp`, `uitofp`
+      `fptosi`, `fptoui`, `sitofp`, `uitofp`, `fpext`, `fptrunc`
     * Symbolic constants, integer literals, and expressions using `+`, `-`,
       `*`, `/`, and `%` may be integer or floating point
     * Floating-point literals

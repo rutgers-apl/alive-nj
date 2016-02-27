@@ -2,9 +2,10 @@
 General object representing transformations (optimizations).
 '''
 
-from language import *
-from typing import TypeConstraints
-import logging, pretty
+from .language import *
+from .typing import TypeConstraints
+from . import pretty
+import logging
 
 logger = logging.getLogger(__name__)
 

@@ -4,11 +4,11 @@ import logging, logging.config, argparse, sys
 import os
 import os.path
 import itertools
-import config
-import typing
-import refinement
-import smtinterp
-from parser import parse_opt_file
+from . import config
+from . import typing
+from . import refinement
+from . import smtinterp
+from .parser import parse_opt_file
 
 class StatusReporter(object):
   _fmt         = '{0.tested} Tested. Done {0.checks:2} for {0.opt.name!r}'
@@ -176,12 +176,3 @@ def main():
       status_reporter.fail_opt(e)
 
   status_reporter.final_status()
-
-if __name__ == '__main__':
-  try:
-    main()
-  except KeyboardInterrupt:
-    sys.stderr.write('\n[Keyboard interrupt]\n')
-  except Exception, e:
-    logging.exception(e)
-    raise
