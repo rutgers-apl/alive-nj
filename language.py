@@ -4,7 +4,7 @@ Defines the internal representation as nodes in a DAG.
 
 import pretty
 import itertools
-
+import operator
 
 # Type system
 # -----------
@@ -14,7 +14,19 @@ class Type(object):
   def __ne__(self, other):
     return not (self == other)
 
-class IntType(Type):
+import operator
+
+
+class Comparable(object):
+  def __eq__(self, other): return self._cmp(operator.eq, other)
+  def __ge__(self, other): return self._cmp(operator.ge, other)
+  def __gt__(self, other): return self._cmp(operator.gt, other)
+  def __le__(self, other): return self._cmp(operator.le, other)
+  def __lt__(self, other): return self._cmp(operator.lt, other)
+  def __ne__(self, other): return self._cmp(operator.ne, other)
+
+
+class IntType(Type, Comparable):
   __slots__ = ('width',)
   def __init__(self, width):
     self.width = width
@@ -28,14 +40,13 @@ class IntType(Type):
   def __hash__(self):
     return hash(type(self)) ^ hash(self.width)
 
-  def __eq__(self, other):
-    return type(other) is IntType and self.width == other.width
-
-  def __gt__(self, other):
+  def _cmp(self, op, other):
     if isinstance(other, int):
-      return self.width > other
+      return op(self.width, other)
+    if isinstance(other, IntType):
+      return op(self.width, other.width)
 
-    return type(other) is IntType and self.width > other.width
+    return NotImplemented
 
 class PtrType(Type):
   __slots__ = ()
@@ -44,20 +55,31 @@ class PtrType(Type):
   def __eq__(self, other):
     return type(self) is type(other)
 
+  def __ne__(self, other):
+    return not(self == other)
+
   def __hash__(self):
     return hash(PtrType) * 2
 
   def __repr__(self):
     return 'PtrType()'
 
-class FloatType(Type):
+class FloatType(Type, Comparable):
   __slots__ = ()
 
   def __repr__(self):
     return type(self).__name__ + '()'
 
-  def __eq__(self, other):
-    return type(other) is type(self)
+  def __hash__(self):
+    return hash(type(self)) * 2
+
+  def _cmp(self, op, other):
+    if isinstance(other, int):
+      return op(self.frac, other)
+    if isinstance(other, FloatType):
+      return op(self.frac, other.frac)
+
+    return NotImplemented
 
 class HalfType(FloatType):
   __slots__ = ()
@@ -223,6 +245,8 @@ class FPtoSIInst(ConversionInst): code = 'fptosi'
 class FPtoUIInst(ConversionInst): code = 'fptoui'
 class SItoFPInst(ConversionInst): code = 'sitofp'
 class UItoFPInst(ConversionInst): code = 'uitofp'
+class FPTruncInst(ConversionInst): code = 'fptrunc'
+class FPExtInst(ConversionInst): code = 'fpext'
 
 class IcmpInst(Instruction):
   __slots__ = ('pred', 'x', 'y', 'ty', 'name')
@@ -426,6 +450,14 @@ class WidthCnxp(FunCnxp):
 class ZExtCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'zext'
+
+class FPExtCnxp(FunCnxp):
+  sig  = (Constant,)
+  code = 'fpext'
+
+class FPTruncCnxp(FunCnxp):
+  sig  = (Constant,)
+  code = 'fptrunc'
 
 class FPtoSICnxp(FunCnxp):
   sig  = (Constant,)
@@ -677,16 +709,16 @@ class BaseTypeConstraints(Visitor):
   def ZExtInst(self, term):
     self.specific(term, term.ty)
     self.specific(term.arg, term.src_ty)
-    self.integer(term) # TODO: should width_ceiling imply integer?
+    self.integer(term)
     self.integer(term.arg)
-    self.width_ceiling(term.arg, term)
+    self.width_order(term.arg, term)
 
   def TruncInst(self, term):
     self.specific(term, term.ty)
     self.specific(term.arg, term.src_ty)
     self.integer(term)
     self.integer(term.arg)
-    self.width_ceiling(term, term.arg)
+    self.width_order(term, term.arg)
 
   def ZExtOrTruncInst(self, term):
     self.integer(term)
@@ -711,6 +743,20 @@ class BaseTypeConstraints(Visitor):
     self.integer(term.arg)
     self.specific(term, term.ty)
     self.specific(term.arg, term.src_ty)
+
+  def FPExtInst(self, term):
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+    self.float(term)
+    self.float(term.arg)
+    self.width_order(term.arg, term)
+
+  def FPTruncInst(self, term):
+    self.specific(term, term.ty)
+    self.specific(term.arg, term.src_ty)
+    self.float(term)
+    self.float(term.arg)
+    self.width_order(term, term.arg)
 
   def UItoFPInst(self, term):
     self.float(term)
@@ -738,13 +784,12 @@ class BaseTypeConstraints(Visitor):
     self.eq_types(term, term.arg1, term.arg2)
 
   def Literal(self, term):
-    # TODO: figure out how to make literals int/float polymorphic
-    self.integer(term)
+    self.number(term)
 
     x = term.val
     bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
     if bl > 0:
-      self.width_ceiling(bl-1, term)  # bl-1 because the ceiling is a hard limit
+      self.width_order(bl-1, term)  # bl-1 because the ceiling is a hard limit
 
   def FLiteral(self, term):
     self.float(term)
@@ -811,13 +856,19 @@ class BaseTypeConstraints(Visitor):
     self.eq_types(term, *term._args)
   
   def SExtCnxp(self, term):
-    self.width_ceiling(term._args[0], term)
+    self.integer(term)
+    self.integer(term._args[0])
+    self.width_order(term._args[0], term)
 
   def ZExtCnxp(self, term):
-    self.width_ceiling(term._args[0], term)
+    self.integer(term)
+    self.integer(term._args[0])
+    self.width_order(term._args[0], term)
 
   def TruncCnxp(self, term):
-    self.width_ceiling(term, term._args[0])
+    self.integer(term)
+    self.integer(term._args[0])
+    self.width_order(term, term._args[0])
 
   def FPtoSICnxp(self, term):
     self.float(term._args[0])
@@ -834,6 +885,16 @@ class BaseTypeConstraints(Visitor):
   def UItoFPCnxp(self, term):
     self.integer(term._args[0])
     self.float(term)
+
+  def FPExtCnxp(self, term):
+    self.float(term)
+    self.float(term._args[0])
+    self.width_order(term, term._args[0])
+
+  def FPTruncCnxp(self, term):
+    self.float(term)
+    self.float(term._args[0])
+    self.width_order(term, term._args[0])
 
   def WidthCnxp(self, term):
     self.integer(term)

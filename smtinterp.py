@@ -269,6 +269,14 @@ class SMTTranslator(Visitor):
     
     return z3.Extract(tgt-1, 0, v)
 
+  def FPExtInst(self, term):
+    v = self.eval(term.arg)
+    return z3.fpToFP(z3.RNE(), v, _ty_sort(self.type(term)))
+    # TODO: fpext range/rounding check
+    # TODO: fptrunc range/rounding check
+
+  FPTruncInst = FPExtInst
+
   # TODO: find better way to do range checks for [su]itofp, fpto[su]i
   def FPtoSIInst(self, term):
     v = self.eval(term.arg)
@@ -519,6 +527,14 @@ class SMTTranslator(Visitor):
 
     bits = self.type(term).width
     return z3.Extract(bits-1, 0, x)
+
+  def FPExtCnxp(self, term):
+    v = self.eval(term._args[0])
+    return z3.fpToFP(z3.RNE(), v, _ty_sort(self.type(term)))
+    # TODO: fpext() range/rounding check
+    # TODO: fptrunc() range/rounding check
+
+  FPTruncCnxp = FPExtCnxp
 
   def FPtoSICnxp(self, term):
     x = self.eval(term._args[0])

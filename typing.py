@@ -5,6 +5,7 @@ Apply typing constraints to the IR.
 from language import *
 import disjoint, pretty
 import logging, itertools
+import collections
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class TypeConstraints(BaseTypeConstraints):
   def __init__(self, maxwidth=64):
     self.sets = disjoint.DisjointSubsets()
     self.specifics = {}
-    self.constraints = {}
+    self.constraints = collections.defaultdict(lambda: FIRST_CLASS)
     self.ordering = set() # pairs (x,y) where width(x) < width(y)
     self.widthlimit = maxwidth+1
 
@@ -117,7 +118,7 @@ class TypeConstraints(BaseTypeConstraints):
   def constrain(self, term, con):
     self.ensure(term)
     r = self.sets.rep(term)
-    con0 = self.constraints.get(r, FIRST_CLASS)
+    con0 = self.constraints[r]
 
     logger.debug('Refining constraint for %s: %s & %s', term, con, con0)
     c = most_specific(con0, con)
@@ -150,7 +151,7 @@ class TypeConstraints(BaseTypeConstraints):
   def first_class(self, term):
     self.constrain(term, FIRST_CLASS)
 
-  def width_ceiling(self, lo, hi):
+  def width_order(self, lo, hi):
     if isinstance(lo, Value):
       self.ensure(lo)
     self.ensure(hi)
@@ -182,6 +183,10 @@ class TypeConstraints(BaseTypeConstraints):
       logger.debug('simplified ordering:\n  ' + 
         pretty.pformat(ords, indent=2))
 
+    assert all(isinstance(lo, int) or
+      most_specific(self.constraints[lo], self.constraints[hi]) is not None
+      for (lo, hi) in ords)
+
     self.ordering = ords
 
   def type_models(self):
@@ -210,13 +215,13 @@ class TypeConstraints(BaseTypeConstraints):
       if lo == hi:
         raise Error('Incompatible constraints for {}: circular ordering'.format(
           lo.name if hasattr(lo, 'name') else str(lo)))
-      if lo in model and hi in model and model[lo].width >= model[hi].width:
+      if lo in model and hi in model and model[lo] >= model[hi]:
         raise Error('Incompatible constraints for {} and {}: {} < {}'.format(
           lo.name if hasattr(lo, 'name') else str(lo),
           hi.name if hasattr(hi, 'name') else str(hi),
           model[lo],
           model[hi]))
-      if isinstance(lo, int) and hi in model and lo >= model[hi].width:
+      if isinstance(lo, int) and hi in model and model[hi] <= lo:
         raise Error('Incompatible constraints for {}: {} < {}'.format(
           hi.name if hasattr(hi, 'name') else str(hi),
           IntType(lo),
@@ -240,13 +245,22 @@ class TypeConstraints(BaseTypeConstraints):
       return
 
     v = vars[n]
-    con = self.constraints.get(v, FIRST_CLASS)
+    con = self.constraints[v]
     if con == FIRST_CLASS:
       tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),), self.float_tys)
     elif con == NUMBER:
       tys = itertools.chain(self._ints(1, self.widthlimit), self.float_tys)
     elif con == FLOAT:
       tys = self.float_tys
+
+      for lo,hi in self.ordering:
+        if lo == v and hi in model:
+          tys = tuple(ty for ty in tys if ty < model[hi])
+        elif hi == v and lo in model:
+          tys = tuple(ty for ty in tys if ty > model[lo])
+        elif hi == v and isinstance(lo, int):
+          tys = tuple(ty for ty in tys if ty > lo)
+
     elif con == INT_PTR:
       tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),))
     elif con == PTR:
