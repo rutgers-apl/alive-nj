@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 UB, POISON, UNEQUAL = range(3)
 
-def check_refinement(opt, type_model, translator=config.translator):
+def check(opt, type_model, translator=config.translator):
   logger.debug('Checking refinement of %r', opt.name)
 
   translator = smtinterp.SMTTranslator.registry[translator]
@@ -29,24 +29,21 @@ def check_refinement(opt, type_model, translator=config.translator):
     sd += [pb] + pd
     # NOTE: should we require sd => pd?
 
+  def err(c, m):
+    return CounterExampleError(c, m, type_model, opt.src, sv, tv, translator)
+
   if td:
     if config.poison_undef:
       expr = sd + sp + [mk_not(td)]
     else:
       expr = sd + [mk_not(td)]
 
-    m = check_expr(UB, mk_forall(qvars, expr), opt)
-    if m is not None:
-      return RefinementError(UB, m, type_model, opt.src, sv, tv, translator)
+    check_expr(UB, mk_forall(qvars, expr), opt, err)
 
   if tp:
-    m = check_expr(POISON, mk_forall(qvars, sd + sp + [mk_not(tp)]), opt)
-    if m is not None:
-      return RefinementError(POISON, m, type_model, opt.src, sv, tv, translator)
+    check_expr(POISON, mk_forall(qvars, sd + sp + [mk_not(tp)]), opt, err)
 
-  m = check_expr(UNEQUAL, mk_forall(qvars, sd + sp + [z3.Not(sv == tv)]), opt)
-  if m is not None:
-    return RefinementError(UNEQUAL, m, type_model, opt.src, sv, tv, translator)
+  check_expr(UNEQUAL, mk_forall(qvars, sd + sp + [z3.Not(sv == tv)]), opt, err)
 
 _stage_name = {
   UB:      'undefined behavior',
@@ -61,7 +58,7 @@ header = '''(set-info :source |
 |)
 '''
 
-def check_expr(stage, expr, opt):
+def check_expr(stage, expr, opt, err):
   s = z3.Solver()
   s.add(expr)
   logger.debug('%s check\n%s', _stage_name[stage], s)
@@ -90,10 +87,10 @@ def check_expr(stage, expr, opt):
     m = s.model()
     logger.debug('counterexample: %s', m)
 
-    return m
+    raise err(stage, m)
 
   if res == z3.unknown:
-    raise Exception('Model returned unknown: ' + s.reason_unknown())
+    raise Error('Model returned unknown: ' + s.reason_unknown())
 
   return None
 
@@ -112,7 +109,11 @@ def format_z3val(val):
   if isinstance(val, z3.FPRef):
     return str(val)
 
-class RefinementError(object): # exception?
+class Error(Exception):
+  def write(self):
+    print 'ERROR:', self
+
+class CounterExampleError(Error):
   def __init__(self, cause, model, types, src, srcv, tgtv, trans):
     self.cause = cause
     self.model = model
