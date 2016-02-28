@@ -45,7 +45,7 @@ def mk_forall(qvars, clauses):
 def bool_to_BitVec(b):
   return z3.If(b, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))
 
-def bv_log2(v, bitwidth):
+def bv_log2(bitwidth, v):
   def rec(h, l):
     if h <= l:
       return z3.BitVecVal(l, bitwidth)
@@ -54,7 +54,7 @@ def bv_log2(v, bitwidth):
   return rec(v.size()-1, 0)
 
 
-def ctlz(v, output_width):
+def ctlz(output_width, v):
   size = v.size()
   def rec(i):
     if i < 0:
@@ -65,7 +65,7 @@ def ctlz(v, output_width):
   return rec(size-1)
 
 
-def cttz(v, output_width):
+def cttz(output_width, v):
   size = v.size()
   def rec(i):
     if i == size:
@@ -76,7 +76,7 @@ def cttz(v, output_width):
   return rec(0)
 
 
-def ComputeNumSignBits(v, bitwidth):
+def ComputeNumSignBits(bitwidth, v):
   size = v.size()
   size1 = size - 1
   sign = z3.Extract(size1, size1, v)

@@ -27,8 +27,10 @@ class OpHandler(object):
   def __init__(self, op):
     self.op = op
 
-  def __call__(self, *args):
-    raise NotImplementedError
+  def __call__(self, obj, term):
+    args = (obj.eval(a) for a in term.args())
+
+    return self.op(*args)
 
   def __get__(self, obj, cls=None):
     # return a method if invoked as obj.handler.
@@ -36,6 +38,11 @@ class OpHandler(object):
       return types.MethodType(self, obj, cls)
 
     return self
+
+class SizedOpHandler(OpHandler):
+  def __call__(self, obj, term):
+    args = (obj.eval(a) for a in term.args())
+    return self.op(obj.type(term).width, *args)
 
 class BinOpHandler(OpHandler):
   _fields = ('op', 'defined', 'poisons')
@@ -238,24 +245,10 @@ class SMTTranslator(Visitor):
   FDivInst = FBinOpHandler(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
   FRemInst = FBinOpHandler(z3.fpRem)
 
-
   # NOTE: SExt/ZExt/Trunc should all have IntType args
-  def SExtInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg).width
-    tgt = self.type(term).width
-    return z3.SignExt(tgt - src, v)
-
-  def ZExtInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg).width
-    tgt = self.type(term).width
-    return z3.ZeroExt(tgt - src, v)
-
-  def TruncInst(self, term):
-    v = self.eval(term.arg)
-    tgt = self.type(term).width
-    return z3.Extract(tgt - 1, 0, v)
+  SExtInst = SizedOpHandler(lambda size, x: z3.SignExt(size - x.size(), x))
+  ZExtInst = SizedOpHandler(lambda size, x: z3.ZeroExt(size - x.size(), x))
+  TruncInst = SizedOpHandler(lambda size, x: z3.Extract(size - 1, 0, x))
 
   def ZExtOrTruncInst(self, term):
     v = self.eval(term.arg)
@@ -385,12 +378,7 @@ class SMTTranslator(Visitor):
 
     return bool_to_BitVec(cmp)
 
-  def SelectInst(self, term):
-    c = self.eval(term.sel)
-    x = self.eval(term.arg1)
-    y = self.eval(term.arg2)
-    
-    return z3.If(c == 1, x, y)
+  SelectInst = OpHandler(lambda c,x,y: z3.If(c == 1, x, y))
 
   def Literal(self, term):
     ty = self.type(term)
@@ -433,8 +421,7 @@ class SMTTranslator(Visitor):
   OrCnxp = BinOpHandler(operator.or_)
   XorCnxp = BinOpHandler(operator.xor)
 
-  def NotCnxp(self, term):
-    return ~self.eval(term.x)
+  NotCnxp = OpHandler(operator.inv)
 
   def NegCnxp(self, term):
     if isinstance(self.type(term), FloatType):
@@ -457,7 +444,7 @@ class SMTTranslator(Visitor):
     #b = ComputeNumSignBits(self.fresh_bv(size), size)
     b = self.fresh_var(ty, 'ana_')
 
-    self.add_defs(z3.ULE(b, ComputeNumSignBits(x, ty.width)))
+    self.add_defs(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
 
     return b
 
@@ -476,57 +463,17 @@ class SMTTranslator(Visitor):
     self.add_defs(b & x == 0)
 
     return b
+  
+  LeadingZerosCnxp = SizedOpHandler(ctlz)
+  TrailingZerosCnxp = SizedOpHandler(cttz)
+  Log2Cnxp = SizedOpHandler(bv_log2)
+  LShrFunCnxp = OpHandler(z3.LShR)
+  SMaxCnxp = OpHandler(lambda x,y: z3.If(x > y, x, y))
+  UMaxCnxp = OpHandler(lambda x,y: z3.If(z3.UGT(x,y), x, y))
 
-  def LeadingZerosCnxp(self, term):
-    x = self.eval(term._args[0])
-
-    return ctlz(x, self.type(term).width)
-
-  def TrailingZerosCnxp(self, term):
-    x = self.eval(term._args[0])
-    
-    return cttz(x, self.type(term).width)
-
-  def Log2Cnxp(self, term):
-    x = self.eval(term._args[0])
-
-    return bv_log2(x, self.type(term).width)
-
-  def LShrFunCnxp(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
-    return z3.LShR(x,y)
-
-  def SMaxCnxp(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
-    return z3.If(x > y, x, y)
-
-  def UMaxCnxp(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
-    return z3.If(z3.UGT(x,y), x, y)
-
-  def SExtCnxp(self, term):
-    x = self.eval(term._args[0])
-
-    bits = self.type(term).width
-    return z3.SignExt(bits - x.size(), x)
-
-  def ZExtCnxp(self, term):
-    x = self.eval(term._args[0])
-
-    bits = self.type(term).width
-    return z3.ZeroExt(bits - x.size(), x)
-
-  def TruncCnxp(self, term):
-    x = self.eval(term._args[0])
-
-    bits = self.type(term).width
-    return z3.Extract(bits-1, 0, x)
+  SExtCnxp = SExtInst
+  ZExtCnxp = ZExtInst
+  TruncCnxp = TruncInst
 
   def FPExtCnxp(self, term):
     v = self.eval(term._args[0])
@@ -599,10 +546,7 @@ class SMTTranslator(Visitor):
   def FPSamePred(self, term):
     return self.eval(term._args[0]) == self.eval(term._args[1])
 
-  def IntMinPred(self, term):
-    x = self.eval(term._args[0])
-
-    return x == 1 << (x.size()-1)
+  IntMinPred = OpHandler(lambda x: x == 1 << (x.size()-1))
 
   Power2Pred = MustAnalysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
   Power2OrZPred = MustAnalysis(lambda x: x & (x-1) == 0)
@@ -627,25 +571,17 @@ class SMTTranslator(Visitor):
   NUWSubPred = MustAnalysis(
     lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
 
-  def NSWMulPred(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
+  @OpHandler
+  def NSWMulPred(x,y):
     size = x.size()
     return z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
 
-  def NUWMulPred(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
+  @OpHandler
+  def NUWMulPred(x,y):
     size = x.size()
     return z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
 
-  def NUWShlPred(self, term):
-    x = self.eval(term._args[0])
-    y = self.eval(term._args[1])
-
-    return z3.LShR(x << y, y) == x
+  NUWShlPred = OpHandler(lambda x,y: z3.LShR(x << y, y) == x)
 
   def OneUsePred(self, term):
     return z3.BoolVal(True)

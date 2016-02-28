@@ -160,7 +160,7 @@ class Node(object):
 #     return h
 
   def args(self):
-    return tuple(getattr(self,s) for s in self.__slots__)
+    return tuple(getattr(self,s) for s in self._allslots)
 
 
 class Value(Node):
