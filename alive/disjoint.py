@@ -42,7 +42,7 @@ class DisjointSubsets(object):
 
   def rep(self, key):
     if key not in self._parent:
-      raise KeyError
+      raise KeyError(key)
 
     while self._parent[key] is not None:
       key = self._parent[key]
