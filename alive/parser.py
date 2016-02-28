@@ -324,8 +324,9 @@ class FCmpAst(InstAst):
     ty = self.toks.ty.eval(ids, phase)
     x  = self.toks.x.value(ty, ids, phase)
     y  = self.toks.y.value(ty, ids, phase)
+    flags = tuple(tok.value for tok in self.toks.flags)
 
-    return L.FcmpInst(self.toks.cmp, x, y, ty, name)
+    return L.FcmpInst(self.toks.cmp, x, y, ty, flags, name)
 
 
 class SelectAst(InstAst):
@@ -492,7 +493,7 @@ cmpOp = Optional(ident, '')
 icmp = Literal('icmp') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
 icmp.setParseAction(ICmpAst)
 
-fcmp = Literal('fcmp') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
+fcmp = Literal('fcmp') - flags('flags') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
 fcmp.setParseAction(FCmpAst)
 
 select = Literal('select') - opt_ty('ty') + operand('pred') \

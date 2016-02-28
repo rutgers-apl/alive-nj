@@ -150,6 +150,12 @@ class Formatter(Visitor):
     return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
       self.operand(term.x, term.ty) + ', ' + self.operand(term.y)
 
+  def FcmpInst(self, term):
+    return self.name(term) + ' = ' + 'fcmp ' + \
+      (' '.join(term.flags) + ' ' if term.flags else '') + \
+      term.pred + ' ' + self.operand(term.x, term.ty) + ', ' + \
+      self.operand(term.y)
+
   def SelectInst(self, term):
     return self.name(term) + ' = ' + 'select ' + self.operand(term.sel) + \
       ', ' + self.operand(term.arg1, term.ty1) + \

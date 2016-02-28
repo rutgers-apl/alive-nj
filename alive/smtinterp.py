@@ -376,6 +376,14 @@ class SMTTranslator(Visitor):
 
     cmp = self._fcmp_ops[term.pred](x,y)
 
+    if 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)))
+
+    if 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)))
+
+    # no other flags are meaningful here?
+
     return bool_to_BitVec(cmp)
 
   SelectInst = OpHandler(lambda c,x,y: z3.If(c == 1, x, y))

@@ -262,14 +262,15 @@ class IcmpInst(Instruction):
     return (self.x, self.y)
 
 class FcmpInst(Instruction):
-  __slots__ = ('pred','x','y','ty','name')
+  __slots__ = ('pred','x','y','ty','flags','name')
 
-  def __init__(self, pred, arg1, arg2, ty=None, name=''):
-    self.pred = pred  #FIXME: validate ops
-    self.ty   = ty
-    self.x    = arg1
-    self.y    = arg2
-    self.name = name
+  def __init__(self, pred, arg1, arg2, ty=None, flags=(), name=''):
+    self.pred  = pred  #FIXME: validate ops
+    self.ty    = ty
+    self.flags = flags
+    self.x     = arg1
+    self.y     = arg2
+    self.name  = name
 
   def args(self):
     return (self.x, self.y)
