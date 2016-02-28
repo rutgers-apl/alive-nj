@@ -252,10 +252,12 @@ class OpInstAst(Ast):
   def eval(self, ids, phase):
     r = self.toks.lhs.id
 
+    inst = self.toks.op.inst(r, ids, phase)
+
     if r in ids:
       self._fatal('Redefinition of ' + r)
 
-    ids[r] = self.toks.op.inst(r, ids, phase)
+    ids[r] = inst
 
   def name(self):
     return self.toks.lhs.id
