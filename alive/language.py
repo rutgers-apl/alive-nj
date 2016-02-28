@@ -315,7 +315,14 @@ class Literal(Constant):
   def args(self):
     return ()
 
-class FLiteral(Constant):
+class FLiteral(Constant): pass
+
+class FLiteralNaN(FLiteral): val = 'nan'
+class FLiteralPlusInf(FLiteral): val = 'inf'
+class FLiteralMinusInf(FLiteral): val = '-inf'
+class FLiteralMinusZero(FLiteral): val = '-0.0'
+
+class FLiteralVal(FLiteral):
   __slots__ = ('val',)
   def __init__(self, val):
     self.val = val

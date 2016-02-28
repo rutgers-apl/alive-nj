@@ -68,8 +68,8 @@ class LiteralAst(ValAst):
     if '.' in tok:
       x = float(tok)
       if x == 0.0 and tok[0] == '-':
-        x = 'nz'
-      return L.FLiteral(x)
+        return L.FLiteralMinusZero()
+      return L.FLiteralVal(x)
     return L.Literal(int(tok))
 
 class LitWordAst(ValAst):
@@ -84,6 +84,12 @@ class LitWordAst(ValAst):
       return L.UndefValue(ty)
     if v == 'poison':
       return L.PoisonValue()
+    if v == 'nan':
+      return L.FLiteralNaN()
+    if v == 'inf':
+      return L.FLiteralPlusInf()
+    if v == '-inf':
+      return L.FLiteralMinusInf()
 
     self._fatal('Unrecognized literal {0!r}'.format(v))
 
@@ -461,7 +467,7 @@ pre = infixNotation(pre_atom,
       ])
 pre.setName('precondition')
 
-special_lit = oneOf('true false undef poison null').setParseAction(LitWordAst)
+special_lit = oneOf('true false undef poison null nan inf -inf').setParseAction(LitWordAst)
 operand = (reg | special_lit | cexpr).setName("Operand")
 
 comma = Suppress(',')

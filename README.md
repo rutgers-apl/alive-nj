@@ -27,12 +27,19 @@ Alive-NJ reads from standard input if no arguments are given.
 Alive-NJ adds these features:
 
 * Support for floating-point
-    * half, float, and double types
+    * `half`, `float`, and `double` types
     * Instructions: `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fcmp`,
       `fptosi`, `fptoui`, `sitofp`, `uitofp`, `fpext`, `fptrunc`
     * Symbolic constants, integer literals, and expressions using `+`, `-`,
       `*`, `/`, and `%` may be integer or floating point
     * Floating-point literals
+    * Special values `nan`, `inf`, `-inf`, and `-0.0`
+    * Precondition comparisons use IEEE semantics for floats (thus,
+      `C == 0.0` is satisfied when `C` is positive or negative zero,
+      and `C == nan` is never satisfied)
+    * Predicate `fpsame(C1,C2)` is satisfied when `C1` and `C2` are
+      *structurally* equal (meaning `fpsame(nan,nan)` is true, but
+      `fpsame(0.0, -0.0)` is not)
 * Full replaceability of `undef`: If `%x` is `undef`, then `xor %x, %x` is
   `undef`
 

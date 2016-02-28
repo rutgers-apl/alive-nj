@@ -392,15 +392,23 @@ class SMTTranslator(Visitor):
 
     return z3.BitVecVal(term.val, ty.width)
 
-  def FLiteral(self, term):
+  def FLiteralVal(self, term):
     ty = self.type(term)
     assert isinstance(ty, FloatType)
 
-    if term.val == 'nz':
-      return z3.fpMinusZero(_ty_sort(ty))
-
     return z3.FPVal(term.val, _ty_sort(ty))
 
+  def FLiteralNaN(self, term):
+    return z3.fpNaN(_ty_sort(self.type(term)))
+
+  def FLiteralPlusInf(self, term):
+    return z3.fpPlusInfinity(_ty_sort(self.type(term)))
+
+  def FLiteralMinusInf(self, term):
+    return z3.fpMinusInfinity(_ty_sort(self.type(term)))
+
+  def FLiteralMinusZero(self, term):
+    return z3.fpMinusZero(_ty_sort(self.type(term)))
 
   def UndefValue(self, term):
     ty = self.type(term)
