@@ -411,6 +411,10 @@ class SMTTranslator(Visitor):
     self.add_qvar(x)
     return x
 
+  def PoisonValue(self, term):
+    self.add_nops(z3.BoolVal(False))
+    return self.fresh_var(self.type(term))
+
   # NOTE: constant expressions do no introduce poison or definedness constraints
   #       is this reasonable?
   # FIXME: cnxps need explicit undef checking

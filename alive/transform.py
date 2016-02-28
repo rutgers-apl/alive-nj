@@ -171,6 +171,9 @@ class Formatter(Visitor):
   def UndefValue(self, term):
     return 'undef'
 
+  def PoisonValue(self, term):
+    return 'poison'
+
   def BinaryCnxp(self, term):
     return '(' + \
       ' '.join((self.operand(term.x), term.code, self.operand(term.y))) + \

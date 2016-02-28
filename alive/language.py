@@ -336,6 +336,9 @@ class UndefValue(Constant):
   def args(self):
     return ()
 
+class PoisonValue(Constant):
+  pass
+
 class BinaryCnxp(Constant):
   __slots__ = ('x','y')
   codes = {}
@@ -799,6 +802,9 @@ class BaseTypeConstraints(Visitor):
   def UndefValue(self, term):
     self.first_class(term)
     self.specific(term, term.ty)
+
+  def PoisonValue(self, term):
+    self.first_class(term)
 
   def BinaryCnxp(self, term):
     # FIXME

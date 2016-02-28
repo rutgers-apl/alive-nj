@@ -82,6 +82,8 @@ class LitWordAst(ValAst):
       return L.Literal(0)
     if v == 'undef':
       return L.UndefValue(ty)
+    if v == 'poison':
+      return L.PoisonValue()
 
     self._fatal('Unrecognized literal {0!r}'.format(v))
 
@@ -459,7 +461,7 @@ pre = infixNotation(pre_atom,
       ])
 pre.setName('precondition')
 
-special_lit = oneOf('true false undef null').setParseAction(LitWordAst)
+special_lit = oneOf('true false undef poison null').setParseAction(LitWordAst)
 operand = (reg | special_lit | cexpr).setName("Operand")
 
 comma = Suppress(',')
