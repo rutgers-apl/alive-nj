@@ -3,7 +3,7 @@ Extra functions for dealing with Z3 BitVecs.
 '''
 
 __all__ = ('mk_and', 'mk_or', 'mk_not', 'mk_forall', 'bool_to_BitVec',
-           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits')
+           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits', 'fpUEQ')
 
 import z3
 
@@ -88,3 +88,7 @@ def ComputeNumSignBits(bitwidth, v):
               rec(i-1),
               z3.BitVecVal(size1-i, bitwidth))
   return rec(size - 2)
+
+
+def fpUEQ(x, y):
+  return z3.Or(z3.fpEQ(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))

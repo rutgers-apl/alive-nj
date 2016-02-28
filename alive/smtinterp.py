@@ -88,9 +88,6 @@ class MetaTranslator(MetaVisitor):
     cls.registry[name.lower()] = cls
     return super(MetaTranslator, cls).__init__(name, bases, dict)
 
-def unordered(op):
-  return lambda x,y: z3.Or(op(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
-
 class SMTTranslator(Visitor):
   __metaclass__ = MetaTranslator
   log = logger.getChild('SMTTranslator')
@@ -357,14 +354,14 @@ class SMTTranslator(Visitor):
     'oge': z3.fpGEQ,
     'olt': z3.fpLT,
     'ole': z3.fpLEQ,
-    'one': z3.fpNEQ,
+    'one': lambda x,y: z3.Not(fpUEQ(x,y)),
     'ord': lambda x,y: z3.Not(z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y))),
-    'ueq': unordered(z3.fpEQ),
-    'ugt': unordered(z3.fpGT),
-    'uge': unordered(z3.fpGEQ),
-    'ult': unordered(z3.fpLT),
-    'ule': unordered(z3.fpLEQ),
-    'une': unordered(z3.fpNEQ),
+    'ueq': fpUEQ,
+    'ugt': lambda x,y: z3.Not(z3.fpLEQ(x,y)),
+    'uge': lambda x,y: z3.Not(z3.fpLT(x,y)),
+    'ult': lambda x,y: z3.Not(z3.fpGEQ(x,y)),
+    'ule': lambda x,y: z3.Not(z3.fpGT(x,y)),
+    'une': z3.fpNEQ,
     'uno': lambda x,y: z3.Or(z3.fpIsNaN(x), z3.fpIsNaN(y)),
     'true': lambda x,y: z3.BoolVal(True),
   }
