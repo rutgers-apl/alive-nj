@@ -200,20 +200,16 @@ class OrAst(PreconditionAst):
 
 
 
-predicates = L.FunPred.codes
-functions = L.FunCnxp.codes
-
-
 class FunAst(ValAst, PreconditionAst):
   'Common expression type for <name>(<args>). Supports value and condition.'
 
   def condition(self, ids):
     name = self.toks[0]
 
-    if name not in predicates:
+    if name not in L.FunPred.codes:
       self._fatal('Unknown predicate: ' + name)
 
-    pred = predicates[name]
+    pred = L.FunPred.codes[name]
 
     args = tuple(a.value(None, ids, Phase.Pre) for a in self.toks[1:])
 
@@ -231,10 +227,10 @@ class FunAst(ValAst, PreconditionAst):
     # determine if this is a valid function
     name = self.toks[0]
     
-    if name not in functions:
+    if name not in L.FunCnxp.codes:
       self._fatal('Unknown function: ' + name)
     
-    fun = functions[name]
+    fun = L.FunCnxp.codes[name]
 
     args = tuple(a.value(None, ids, phase) for a in self.toks[1:])
 
@@ -272,23 +268,6 @@ class CopyOpAst(InstAst):
 
   # TODO: replace this entirely
 
-# bin_insts = {
-#   'add':  L.AddInst,
-#   'sub':  L.SubInst,
-#   'mul':  L.MulInst,
-#   'sdiv': L.SDivInst,
-#   'udiv': L.UDivInst,
-#   'srem': L.SRemInst,
-#   'urem': L.URemInst,
-#   'shl':  L.ShlInst,
-#   'ashr': L.AShrInst,
-#   'lshr': L.LShrInst,
-#   'and':  L.AndInst,
-#   'or':   L.OrInst,
-#   'xor':  L.XorInst,
-#   }
-
-bin_insts = L.BinaryOperator.codes
 
 class BinOpAst(InstAst):
   def inst(self, name, ids, phase):
@@ -302,13 +281,6 @@ class BinOpAst(InstAst):
     return op(v1,v2,ty=ty,flags=flags,name=name)
     # FIXME: validate flags
 
-# conv_insts = {
-#   'sext': L.SExtInst,
-#   'zext': L.ZExtInst,
-#   'trunc': L.TruncInst,
-#   }
-
-conv_insts = L.ConversionInst.codes
 
 class ConvOpAst(InstAst):
   def inst(self, name, ids, phase):
@@ -326,7 +298,7 @@ class ICmpAst(InstAst):
     x  = self.toks.x.value(ty, ids, phase)
     y  = self.toks.y.value(ty, ids, phase)
     
-    return L.IcmpInst(self.toks.cmp, x, y, ty, name)
+    return L.IcmpInst(self.toks.cmp[0], x, y, ty, name)
     # FIXME: validate cmp?
 
 class FCmpAst(InstAst):
@@ -336,7 +308,7 @@ class FCmpAst(InstAst):
     y  = self.toks.y.value(ty, ids, phase)
     flags = tuple(tok.value for tok in self.toks.flags)
 
-    return L.FcmpInst(self.toks.cmp, x, y, ty, flags, name)
+    return L.FcmpInst(self.toks.cmp[0], x, y, ty, flags, name)
 
 
 class SelectAst(InstAst):
@@ -418,12 +390,15 @@ opt_ty = Optional(ty).setParseAction(OptionalTypeAst)
 
 lit = Regex("-?\d+(?:.\d+)?").setName("Literal").setParseAction(LiteralAst)
 
-ident = Word(srange("[a-zA-Z]"), srange(r"[a-zA-Z0-9_.]")).setName("Identifier")
+reg = Word('%', srange('[a-zA-Z0-9_.]')).setParseAction(Register)
+reg.setName('Register')
 
-reg = Regex(r"%[a-zA-Z0-9_.]+").setName("Register").setParseAction(Register)
+cname = Word('C', srange('[0-9]'), asKeyword=True).setParseAction(ConstName)
+cname.setName('ConstName')
 
-cname = Regex(r"C\d*(?![a-zA-Z_.])").setName("ConstName").setParseAction(ConstName)
-
+ident = ~ty + ~cname + \
+  Word(srange("[a-zA-Z]"), srange(r"[a-zA-Z0-9_.]"), asKeyword=True)
+ident.setName("Identifier")
 
 cexpr = Forward()
 
@@ -457,9 +432,6 @@ pre_lit = Literal("true").setParseAction(TrueAst)
 pre_comp = (cexpr + OneOrMore(pre_comp_op - cexpr)).setParseAction(CmpAst)
 pre_comp.setName('comparison')
 
-# pre_pred = (ident + Suppress('(') + args + Suppress(')')).setParseAction(FunAst)
-# pre_pred.setName('predicate')
-
 pre_atom = pre_lit | pre_comp | cfunc
 
 pre = infixNotation(pre_atom,
@@ -490,16 +462,17 @@ def opCode(codes):
 
 flags = Group(ZeroOrMore(locatedExpr(oneOf('nsw nuw exact nnan ninf nsz arcp fast'))))
 
-binOp = (opCode(bin_insts) - flags('flags') - opt_ty('ty') - operand('x') - comma
-      - operand('y')).setParseAction(BinOpAst)
+binOp = (opCode(L.BinaryOperator.codes) - flags('flags') - opt_ty('ty')
+      - operand('x') - comma - operand('y')).setParseAction(BinOpAst)
 
 opt_rty = (Suppress('to') - ty | FollowedBy(LineEnd())).setParseAction(OptionalTypeAst)
 
-convOp = (opCode(conv_insts) - opt_ty('sty') - operand('x') - opt_rty('rty')).setParseAction(ConvOpAst)
+convOp = (opCode(L.ConversionInst.codes) - opt_ty('sty') - operand('x')
+          - opt_rty('rty')).setParseAction(ConvOpAst)
 
 cmpOp = Optional(ident, '')
 
-## FIXME: "icmp i8 %x, %y" parses the "i8" as the comparison operator
+# NOTE: are anonymous predicates actually necessary?
 icmp = Literal('icmp') - cmpOp('cmp') - opt_ty('ty') - operand('x') - comma - operand('y')
 icmp.setParseAction(ICmpAst)
 
