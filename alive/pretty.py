@@ -56,7 +56,7 @@ from collections import deque
 from itertools import chain
 import sys, StringIO
 
-__all__ = ('text', 'prepr', 'line', 'break', 'softline',
+__all__ = ('text', 'prepr', 'line', 'lbreak', 'softline',
   'group', 'seq', 'iter_seq', 'nest',
   'pprint', 'pformat')
 
