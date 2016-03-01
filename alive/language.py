@@ -631,21 +631,28 @@ class OneUsePred(FunPred):
 # Utilities
 # ---------
 
-def subterms(term):
-  'Generate all subterms of the provided term'
+def subterms(term, seen = None):
+  '''Generate all subterms of the provided term.
 
-  queue = [term]
+  No subterm is generated twice. All terms appear after their subterms.
+  '''
+
+  if seen is None:
+    seen = set()
+  elif term in seen:
+    return
+
+  for a in term.args():
+    for s in subterms(a, seen):
+      yield s
+
+  seen.add(term)
+  yield term
+
+def proper_subterms(term):
   seen = set()
 
-  while queue:
-    t = queue.pop()
-    if t in seen: continue
-    yield t
-
-    seen.add(t)
-    args = t.args()
-    queue.extend(args)
-
+  return itertools.chain.from_iterable(subterms(a, seen) for a in term.args())
 
 # Visitor
 # -------

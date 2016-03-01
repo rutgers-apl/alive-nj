@@ -136,8 +136,8 @@ class CounterExampleError(Error):
 
     smt = self.trans(self.types)
 
-    vars = [v for v in subterms(self.src) if isinstance(v, (Input, Instruction))]
-    vars = vars[1:]
+    vars = [v for v in proper_subterms(self.src)
+                if isinstance(v, (Input, Instruction))]
 
 # this bit doesn't work if the target contains explicit undef
 #     tvars = [v for v in subterms(self.tgt) if isinstance(v, Instruction)]
@@ -161,7 +161,7 @@ class CounterExampleError(Error):
       if len(name) > name_width: name_width = len(name)
 
     print 'Example:'
-    for ty,name,val in reversed(rows):
+    for ty,name,val in rows:
       print '{0:>{1}} {2:{3}} = {4}'.format(ty,ty_width,name,name_width,val)
 
     src_v = self.model.evaluate(self.srcv, True)
