@@ -53,7 +53,16 @@ class DisjointSubsets(object):
     rep = self.rep(key)
     return self._subset[rep]
 
-  def unify(self, key1, key2):
+  def unify(self, key1, key2, merge=None):
+    """Merge the sets containing these keys.
+
+    The resulting set will be represented by one of the representatives of
+    the old set(s).
+
+    Keywords:
+      merge - called with the resulting set's representative and the other,
+        former representative
+    """
     rep1 = self.rep(key1)
     rep2 = self.rep(key2)
 
@@ -64,6 +73,8 @@ class DisjointSubsets(object):
     subset1 = self._subset[rep1]
     subset2 = self._subset.pop(rep2)
     self._subset[rep1] = subset1.union(subset2)
+    
+    if merge: merge(rep1, rep2)
 
   def unified(self, key1, key2):
     return self.rep(key1) == self.rep(key2)

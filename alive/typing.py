@@ -60,6 +60,7 @@ def meets_constraint(con, ty):
 
 
 class TypeConstraints(BaseTypeConstraints):
+  logger = logger.getChild('TypeConstraints')
   def __init__(self, maxwidth=64):
     self.sets = disjoint.DisjointSubsets()
     self.specifics = {}
@@ -75,9 +76,18 @@ class TypeConstraints(BaseTypeConstraints):
       return
 
     assert isinstance(term, Value)
-    logger.debug('adding term %s', term)
+    self.logger.debug('adding term %s', term)
     self.sets.add_key(term)
     term.accept(self)
+
+  def _merge(self, t1, t2):
+    self.logger.debug('unifying %s and %s', t1, t2)
+
+    if t2 in self.specifics:
+      self.specific(t1, self.specifics.pop(t2))
+
+    if t2 in self.constraints:
+      self.constrain(t1, self.constraints.pop(t2))
 
   def eq_types(self, *terms):
     for t in terms:
@@ -86,26 +96,16 @@ class TypeConstraints(BaseTypeConstraints):
     it = iter(terms)
     t1 = self.sets.rep(it.next())
     for t2 in it:
-      if self.sets.unified(t1,t2):
-        continue
+      self.sets.unify(t1, t2, self._merge)
 
-      logger.debug('unifying %s and %s',t1,t2)
-      t2 = self.sets.rep(t2)
-      self.sets.unify(t1,t2)
-      if t2 == self.sets.rep(t1):
-        t1,t2 = t2,t1
-      
-      if t2 in self.specifics:
-        self.specific(t1, self.specifics.pop(t2))
-      if t2 in self.constraints:
-        self.constrain(t1, self.constraints.pop(t2))
+
 
   def specific(self, term, ty):
     self.ensure(term)
     if ty is None:
       return
 
-    logger.debug('specifying %s : %s', term, ty)
+    self.logger.debug('specifying %s : %s', term, ty)
     r = self.sets.rep(term)
     if r not in self.specifics:
       self.specifics[r] = ty
@@ -120,7 +120,7 @@ class TypeConstraints(BaseTypeConstraints):
     r = self.sets.rep(term)
     con0 = self.constraints[r]
 
-    logger.debug('Refining constraint for %s: %s & %s', term, con, con0)
+    self.logger.debug('Refining constraint for %s: %s & %s', term, con, con0)
     c = most_specific(con0, con)
     if c is None:
       raise Error('Incompatible constraints for {}: {} and {}'.format(
@@ -172,15 +172,15 @@ class TypeConstraints(BaseTypeConstraints):
 
 
   def simplify_orderings(self):
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.debug('simplifying ordering:\n  ' + 
+    if self.logger.isEnabledFor(logging.DEBUG):
+      self.logger.debug('simplifying ordering:\n  ' + 
         pretty.pformat(self.ordering, indent=2))
 
     ords = { (lo if isinstance(lo, int) else self.sets.rep(lo), self.sets.rep(hi))
               for (lo,hi) in self.ordering }
 
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.debug('simplified ordering:\n  ' + 
+    if self.logger.isEnabledFor(logging.DEBUG):
+      self.logger.debug('simplified ordering:\n  ' + 
         pretty.pformat(ords, indent=2))
 
     assert all(isinstance(lo, int) or
@@ -190,7 +190,7 @@ class TypeConstraints(BaseTypeConstraints):
     self.ordering = ords
 
   def type_models(self):
-    logger.debug('generating models')
+    self.logger.debug('generating models')
     self.simplify_orderings()
     
     numbers = [r for (r,con) in self.constraints.iteritems() if con == NUMBER]
@@ -229,8 +229,8 @@ class TypeConstraints(BaseTypeConstraints):
 
     vars = tuple(r for r in self.sets.reps() if r not in self.specifics)
     if logger.isEnabledFor(logging.DEBUG):
-      logger.debug('variables:\n  ' + pretty.pformat(vars, indent=2))
-      logger.debug('initial model:\n  ' + pretty.pformat(model, indent=2))
+      self.logger.debug('variables:\n  ' + pretty.pformat(vars, indent=2))
+      self.logger.debug('initial model:\n  ' + pretty.pformat(model, indent=2))
 
     return self._iter_models(0, vars, model)
 
@@ -238,8 +238,8 @@ class TypeConstraints(BaseTypeConstraints):
 
   def _iter_models(self, n, vars, model):
     if n == len(vars):
-      if logger.isEnabledFor(logging.DEBUG):
-        logger.debug('emitting model\n  ' + pretty.pformat(model, indent=2))
+      if self.logger.isEnabledFor(logging.DEBUG):
+        self.logger.debug('emitting model\n  ' + pretty.pformat(model, indent=2))
 
       yield TypeModel(self.sets, dict(model))
       return
@@ -277,7 +277,7 @@ class TypeConstraints(BaseTypeConstraints):
         elif hi == v and isinstance(lo, int) and lo >= wmin:
           wmin = lo+1
 
-      logger.debug('Int range [%s,%s) for %s', wmin, wmax, v)
+      self.logger.debug('Int range [%s,%s) for %s', wmin, wmax, v)
       tys = self._ints(wmin,wmax)
 
     elif con == BOOL:
