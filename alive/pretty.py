@@ -56,9 +56,9 @@ from collections import deque
 from itertools import chain
 import sys, StringIO
 
-__all__ = ('text', 'prepr', 'line', 'lbreak', 'softline',
+__all__ = ('text', 'prepr', 'line', 'lbreak', 'softline', 'commaline',
   'group', 'seq', 'iter_seq', 'nest',
-  'pprint', 'pformat')
+  'pprint', 'pformat', 'PrettyRepr')
 
 def iter_seq(doc_it):
   docs = tuple(doc_it)
@@ -105,7 +105,93 @@ def prepr(obj):
 
   return _Text(repr(obj))
 
-class Doc(object):
+
+
+def pprint(*objs, **kws):
+  """Pretty-print specified objects.
+
+  pprint(*objs, file=sys.stdout, sep=line, end='\n', grouped=True, first=True,
+         indent=0, prefix='', **kws)
+
+  Keywords:
+    file    - where to write the objects
+    sep     - a Doc output between objects
+    end     - a string written after any objs have been written
+    grouped - whether to attempt to write on one line
+    first   - if False, apply prefix and indent to first line
+    indent  - indentation level (following first line)
+    prefix  - written before all lines following the first, before any indent
+    width   - desired maximum width
+  """
+  file    = kws.pop('file', sys.stdout)
+  sep     = kws.pop('sep', line)
+  end     = kws.pop('end', '\n')
+  grouped = kws.pop('grouped', True)
+  first   = kws.pop('first', True)
+  indent  = kws.pop('indent', 0)
+  prefix  = kws.pop('prefix', '')
+
+  doc = sep.join(objs)
+  if grouped:
+    doc = group(doc)
+  if not first:
+    file.write(prefix)
+    file.write(' ' * indent)
+
+  doc.write_to(file, indent=indent, prefix=prefix, **kws)
+  if end:
+    file.write(end)
+
+def pformat(*objs, **kws):
+  """Return a string containing the pretty-printed objects.
+
+  pformat(*objs, sep=line, end='', **kws)
+
+  Keywords:
+    sep     - a Doc output between objects
+    end     - a string written after any objs have been written
+    width   - desired maximum width
+    indent  - indentation level (following first line)
+    prefix  - written before all lines following the first, before any indent
+  """
+  sep = kws.pop('sep', line)
+  end = kws.pop('end', '')
+
+  sbuf = StringIO.StringIO()
+  group(sep.join(objs)).write_to(sbuf, **kws)
+  if end:
+    sbuf.write(end)
+
+  return sbuf.getvalue()
+
+
+class PrettyRepr(object):
+  '''Mixin class for objects which can pretty-print their representation.
+  '''
+
+  def pretty(self):
+    'Return a Doc representing the object.'
+    return text(super(PrettyRepr, self).__repr__())
+
+  def __repr__(self):
+    return self.pretty().oneline()
+
+  def pprint(self, stream=None, end='\n', **kws):
+    if stream is None:
+      stream = sys.stdout
+
+    self.pretty().write_to(stream, **kws)
+    if end:
+      stream.write(end)
+
+  def pformat(self, **kws):
+    sbuf = StringIO.StringIO()
+    self.pretty().write_to(sbuf, **kws)
+    return sbuf.getvalue()
+
+
+
+class Doc(PrettyRepr):
   '''The intermediate formatting tree generated during pretty printing.
   
   Use text, prepr, group, seq, line, lbreak, and others to create Docs.
@@ -129,53 +215,48 @@ class Doc(object):
     return seq(other, line, self)
     
   def nest(self, indent):
-    '''doc.nest(i) -> doc
+    """Increase indentation level.
     
-    Indents lines after the first by i spaces.
-    '''
+    doc.nest(x) == nest(x, doc)
+    """
     return _Nest(indent, self)
   
   def join(self, docs):
-    '''d.join(iterable) -> doc
-    
-    Concatenate the documents in iterable, separated by d.
-    '''
+    """Concatenate the docs, separated by this Doc."""
     return iter_seq(joinit(docs, self))
 
-  def _stream_to(self, width, indent, stream):
+  def __str__(self):
+    """Convert this Doc to a string.
+
+    This returns the content of the Doc. Use __repr__ to return the
+    structure of the Doc."""
+    sbuf = StringIO.StringIO()
+    self.write_to(sbuf)
+    return sbuf.getvalue()
+
+  def write_to(self, file, width=80, indent=0, **kws):
+    """Write this doc to the specified file."""
     out = GrowGroups(AddHP(
-      FindGroupEnds(width, TextEvents(width, stream.write))))
+      FindGroupEnds(width, TextEvents(width, file.write, **kws))))
     self.send(out, indent)
     out.flush()
 
-  def pprint(self, width=80, indent=0, stream=None):
-    if stream is None: stream = sys.stdout
-    self._stream_to(width, indent, stream)
-    stream.write('\n')
-
-  def pformat(self, width=80, indent=0):
-    sbuf = StringIO.StringIO()
-    self._stream_to(width, indent, sbuf)
-    return sbuf.getvalue()
-
   def oneline(self):
+    """Convert this Doc to a one-line string."""
     sbuf = StringIO.StringIO()
     def out(event):
       if event[0] == Doc.Text:
         sbuf.write(event[1])
       elif event[0] == Doc.Line:
         sbuf.write(' ')
-    
+
     self.send(out, 0)
     return sbuf.getvalue()
 
   def pretty(self):
-    return group(type(self).__name__, '(', lbreak,
-      (',' + line).join(prepr(getattr(self,s)) for s in self.__slots__),
-      ')').nest(2)
+    """Return the structure of this Doc as a Doc."""
+    return pfun(type(self).__name__, (getattr(self,s) for s in self.__slots__))
 
-  def __repr__(self):
-    return self.pretty().oneline()
 
 class _Text(Doc):
   __slots__ = ('text',)
@@ -443,13 +524,19 @@ class FindGroupEnds(object):
       self.next(event)
 
 class TextEvents(object):
-  '''Write an annotated event stream to some method.
+  """Write an annotated event stream to some method.
   
-  This will typically be called with sys.stdout.write or something similar.
-  '''
+  Arguments:
+    width - Desired maximum width for printing
+    out   - A function which accepts strings (e.g. sys.stdout.write)
+  Keywords:
+    prefix - A string to put the start of each line. This counts against
+             the given width.
+  """
 
-  def __init__(self, width, out):
-    self.width = width
+  def __init__(self, width, out, prefix=''):
+    self.width = width - len(prefix)
+    self.newline = '\n' + prefix
     self.out = out
     self.fits = 0
     self.hpl = width
@@ -461,11 +548,13 @@ class TextEvents(object):
       if self.fits:
         self.out(' ')
       else:
-        self.out('\n' + ' ' * event[2])
+        self.out(self.newline)
+        self.out(' ' * event[2])
         self.hpl = event[1] + self.width - event[2]
     elif event[0] == Doc.Break:
       if not self.fits:
-        self.out('\n' + ' ' * event[2])
+        self.out(self.newline)
+        self.out(' ' * event[2])
         self.hpl = event[1] + self.width - event[2]
     elif event[0] == Doc.GBegin:
       if self.fits:
@@ -480,35 +569,40 @@ class TextEvents(object):
 line = _Line()
 lbreak = _Break()
 softline = _Group(line)
+commaline = seq(',', line)
 
 def nest(indent, doc):
   return _Nest(indent, doc)
-  
+
+def pfun(name, args, indent=2):
+  args = tuple(prepr(a) for a in args)
+  if len(args) == 0:
+    return seq(name, '()')
+  return group(name, '(', lbreak, commaline.join(args), ')').nest(indent)
+
+def pfun_(name, args):
+  if len(args) == 0:
+    return seq(name, '()')
+  return group(name, '(', commaline.join(args), ')').nest(len(name)+1)
 
 def pdict(dict):
   return group('{',
-    (',' + line).join(group(prepr(k), ':', line, prepr(v)).nest(2)
+    commaline.join(group(prepr(k), ':', line, prepr(v)).nest(2)
       for (k,v) in dict.iteritems()), '}').nest(1)
 
 def plist(list):
-  return group('[', (',' + line).join(prepr(v) for v in list), ']').nest(1)
+  return group('[', commaline.join(prepr(v) for v in list), ']').nest(1)
 
 def ptuple(tup):
   if len(tup) == 0:
     return text('()')
   if len(tup) == 1:
     return group('(', prepr(tup[0]), ',)').nest(1)
-  return group('(', (',' + line).join(prepr(v) for v in tup), ')').nest(1)
+  return group('(', commaline.join(prepr(v) for v in tup), ')').nest(1)
 
 def pset(set):
   nm = type(set).__name__
   return seq(nm, '(', plist(sorted(set)), ')').nest(len(nm)+1)
-
-def pprint(obj, width=80, indent=0, stream=None):
-  text(obj).pprint(width, indent, stream)
-
-def pformat(obj, width=80, indent=0):
-  return text(obj).pformat(width, indent)
 
 
 

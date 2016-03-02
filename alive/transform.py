@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class Transform(object):
+class Transform(pretty.PrettyRepr):
   def __init__(self, src, tgt, pre=None, name=''):
     self.name = name
     self.pre = pre
@@ -18,11 +18,8 @@ class Transform(object):
     self.tgt = tgt
 
   def pretty(self):
-    return pretty.group(type(self).__name__, '(', pretty.lbreak,
-      pretty.prepr(self.src), ',', pretty.line,
-      pretty.prepr(self.tgt), ',', pretty.line,
-      pretty.prepr(self.pre), ',', pretty.line,
-      pretty.prepr(self.name), ')').nest(2)
+    return pretty.pfun(type(self).__name__,
+      (self.src, self.tgt, self.pre, self.name))
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)

@@ -130,7 +130,7 @@ class MetaNode(type):
 
     return super(MetaNode, cls).__init__(name, bases, dict)
 
-class Node(object):
+class Node(pretty.PrettyRepr):
   __metaclass__ = MetaNode
 
   def accept(self, visitor, *args, **kws):
@@ -138,12 +138,8 @@ class Node(object):
     # makes the stack trace slightly ugly, but saves a bunch of typing
 
   def pretty(self):
-    return pretty.group(type(self).__name__, '(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(getattr(self,s)) for s in self._allslots),
-      ')').nest(2)
-
-  def __repr__(self):
-    return self.pretty().oneline()
+    args = (getattr(self,s) for s in self._allslots)
+    return pretty.pfun(type(self).__name__, args)
 
 # NOTE: these are desirable, but shouldn't be activated until typing
 # and smtinterp are thought through. In particular, two instances of
@@ -399,9 +395,7 @@ class FunCnxp(Constant):
     self._args = args
 
   def pretty(self):
-    return pretty.group(type(self).__name__, '(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(a) for a in self._args),
-      ')').nest(2)
+    return pretty.pfun_(type(self).__name__, self._args)
 
   def args(self):
     return self._args
@@ -499,9 +493,7 @@ class AndPred(Predicate):
     self.clauses = clauses
 
   def pretty(self):
-    return pretty.group('AndPred(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(a) for a in self.clauses),
-      ')').nest(2)
+    return pretty.pfun('AndPred', self.clauses)
 
   def args(self):
     return self.clauses
@@ -515,9 +507,7 @@ class OrPred(Predicate):
     self.clauses = clauses
 
   def pretty(self):
-    return pretty.group('OrPred(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(a) for a in self.clauses),
-      ')').nest(2)
+    return pretty.pfun('OrPred', self.clauses)
 
   def args(self):
     return self.clauses
@@ -561,9 +551,7 @@ class FunPred(Predicate):
     self._args = args
 
   def pretty(self):
-    return pretty.group(type(self).__name__, '(', pretty.lbreak,
-      (',' + pretty.line).join(pretty.prepr(a) for a in self._args),
-      ')').nest(2)
+    return pretty.pfun(type(self).__name__, self._args)
 
   def args(self):
     return self._args
