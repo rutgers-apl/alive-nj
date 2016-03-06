@@ -267,64 +267,62 @@ class SMTTranslator(Visitor):
 
   FPTruncInst = FPExtInst
 
-  # TODO: find better way to do range checks for [su]itofp, fpto[su]i
   def FPtoSIInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
     tgt = self.type(term)
-    # TODO: fptosi range check
 
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
+    m = 2**(tgt.width-1)
 
-    x = z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
+    self.add_defs(v >= -m, v <= m-1)
+    # this should be okay, because the bounds will round
+    # towards zero if too large for the source type, only
+    # excluding the infinities and NaN
 
-    return z3.If(
-      z3.fpToFP(z3.RTZ(), x, _ty_sort(src)) == z3.fpRoundToIntegral(z3.RTZ(),v),
-      x, q)
+    return z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
+    # LLVM specifies RTZ
 
   def FPtoUIInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
     tgt = self.type(term)
-    # TODO: fptoui range check
 
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
+    self.add_defs(v >= 0, v <= (2**tgt.width)-1)
 
-    x = z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
+    return z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
+    # LLVM specifies RTZ
 
-    return z3.If(
-      z3.fpToFPUnsigned(z3.RTZ(), x, _ty_sort(src)) == z3.fpRoundToIntegral(z3.RTZ(),v),
-      x, q)
-
+  # LLVM specifies: "If the value cannot fit in the floating point value,
+  # the results are undefined."
+  #
+  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
+  # requires an exponent too large for the type. Assume "results are undefined"
+  # means undefined behavior.
   def SItoFPInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
     tgt = self.type(term)
 
-    if src.width + 1 <= tgt.frac:
-      return z3.fpToFP(z3.RTZ(), v, _ty_sort(tgt))
+    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
 
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
+    if src.width > w:
+      m = (2**tgt.frac - 1) << (w-tgt.frac)
+      self.add_defs(v >= -m, v <= m)
 
-    x = z3.fpToFP(z3.RTZ(), v, _ty_sort(tgt))
-    return z3.If(z3.fpToSBV(z3.RTZ(), x, _ty_sort(src)) == v, x, q)
+    return z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
 
   def UItoFPInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
     tgt = self.type(term)
 
-    if src.width < tgt.frac:
-      return z3.fpToFPUnsigned(z3.RTZ(), v, _ty_sort(tgt))
+    w = 2**(tgt.exp-1)
 
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
+    if src.width >= w:
+      m = (2**tgt.frac-1) << (w - tgt.frac)
+      self.add_defs(z3.UGE(v, 0), z3.ULE(v, m))
 
-    x = z3.fpToFPUnsigned(z3.RTZ(), v, _ty_sort(tgt))
-    return z3.If(z3.fpToUBV(z3.RTZ(), x, _ty_sort(src)) == v, x, q)
+    return z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
 
   _icmp_ops = {
     'eq': operator.eq,
@@ -500,25 +498,25 @@ class SMTTranslator(Visitor):
 
   FPTruncCnxp = FPExtCnxp
 
-  def FPtoSICnxp(self, term):
+  def FPtoSICnxp(self, term): #FIXME
     x = self.eval(term._args[0])
     tgt = self.type(term)
 
     return z3.fpToSBV(z3.RTZ(), x, _ty_sort(tgt))
 
-  def FPtoUICnxp(self, term):
+  def FPtoUICnxp(self, term): #FIXME
     x = self.eval(term._args[0])
     tgt = self.type(term)
 
     return z3.fpToUBV(z3.RTZ(), x, _ty_sort(tgt))
 
-  def SItoFPCnxp(self, term):
+  def SItoFPCnxp(self, term): #FIXME
     x = self.eval(term._args[0])
     tgt = self.type(term)
 
     return z3.fpToFP(z3.RTZ(), x, _ty_sort(tgt))
 
-  def UItoFPCnxp(self, term):
+  def UItoFPCnxp(self, term): #FIXME
     x = self.eval(term._args[0])
     tgt = self.type(term)
 
@@ -642,6 +640,57 @@ class FastMathUndef(SMTTranslator):
       return z3.If(mk_and(conds), z, q)
 
     return z
+
+class FPOverflowUndef(SMTTranslator):
+  def SItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    w = 2**(tgt.exp-1)
+    z = z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+
+    if src.width <= w:
+      return z
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    m = (2**tgt.frac - 1) << (w-tgt.frac)
+    return z3.If(z3.And(v >= -m, v <= m), z, q)
+
+  def UItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    w = 2**(tgt.exp-1)
+
+    z = z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+
+    if src.width < w:
+      return z
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    m = (2**tgt.frac-1) << (w - tgt.frac)
+    return z3.If(z3.And(z3.UGE(v, 0), z3.ULE(v, m)), z, q)
+
+  def FPTrunc(self, term):
+    v = self.eval(term.arg)
+
+    w = 2**(tgt.exp-1)
+    m = (2**tgt.frac-1) << (w - tgt.frac)
+
+    q = self.fresh_var(tgt)
+    self.add_qvar(q)
+
+    return z3.If(
+      z3.Or(z3.fpIsNaN(v), z3.fpIsInfinite(v),
+            z3.And(v >= -m, v <= m)),
+      z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
+      q)
 
 class OldNSZ(SMTTranslator):
   def _float_binary_operator(self, term, op):
