@@ -158,6 +158,12 @@ class Node(pretty.PrettyRepr):
   def args(self):
     return tuple(getattr(self,s) for s in self._allslots)
 
+  def copy(self, **kws):
+    args = tuple(kws[s] if s in kws else getattr(self,s)
+                  for s in self._allslots)
+
+    return type(self)(*args)
+
 
 class Value(Node):
   pass
