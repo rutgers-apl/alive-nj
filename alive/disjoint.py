@@ -2,6 +2,8 @@
 Implements a disjoint subset structure.
 '''
 
+from . import pretty
+
 class DisjointSubsets(object):
   '''
   Stores values in one or more subsets. Each value exists in only one
@@ -81,7 +83,7 @@ class DisjointSubsets(object):
 
 # ----
 
-class Tag(object):
+class Tag(pretty.PrettyRepr):
   '''Subclasses of Tag may be used to label objects, so that they
   may be added to sets or DisjointSubsets multiple times.'''
 
@@ -97,5 +99,5 @@ class Tag(object):
   def __hash__(self):
     return hash(type(self)) ^ hash(self.val)
 
-  def __repr__(self):
-    return '{}({!r})'.format(type(self).__name__, self.val)
+  def pretty(self):
+    return pretty.pfun(type(self).__name__, (self.val,))
