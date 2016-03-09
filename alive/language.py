@@ -430,6 +430,10 @@ class TrailingZerosCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'countTrailingZeros'
 
+class FPMantissaWidthCnxp(FunCnxp):
+  sig  = (Value,)
+  code = 'fpMantissaWidth'
+
 class LShrFunCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'lshr'
@@ -442,6 +446,10 @@ class SMaxCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'max'
 
+class SMinCnxp(FunCnxp):
+  sig  = (Constant, Constant)
+  code = 'min'
+
 class SExtCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'sext'
@@ -453,6 +461,10 @@ class TruncCnxp(FunCnxp):
 class UMaxCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'umax'
+
+class UMinCnxp(FunCnxp):
+  sig  = (Constant, Constant)
+  code = 'umin'
 
 class WidthCnxp(FunCnxp):
   sig  = (Value,)
@@ -566,9 +578,13 @@ class CannotBeNegativeZeroPred(FunPred):
   sig  = (Value,)
   code = 'CannotBeNegativeZero'
 
-class FPSamePred(FunPred):
+class FPIdenticalPred(FunPred):
   sig  = (Constant, Constant)
-  code = 'fpsame'
+  code = 'fpIdentical'
+
+class FPIntegerPred(FunPred):
+  sig  = (Constant,)
+  code = 'fpInteger'
 
 class IntMinPred(FunPred): 
   sig  = (Constant,)
@@ -854,6 +870,10 @@ class BaseTypeConstraints(Visitor):
     self.integer(term)
     self.integer(term._args[0])
 
+  def FPMantissaWidthCnxp(self, term):
+    self.float(term._args[0])
+    self.integer(term)
+
   def LShrFunCnxp(self, term):
     self.integer(term)
     self.eq_types(term, *term._args)
@@ -866,10 +886,14 @@ class BaseTypeConstraints(Visitor):
     self.integer(term)
     self.eq_types(term, *term._args)
 
+  SMinCnxp = SMaxCnxp
+
   def UMaxCnxp(self, term):
     self.integer(term)
     self.eq_types(term, *term._args)
-  
+
+  UMinCnxp = UMaxCnxp
+
   def SExtCnxp(self, term):
     self.integer(term)
     self.integer(term._args[0])
@@ -942,9 +966,12 @@ class BaseTypeConstraints(Visitor):
   def CannotBeNegativeZeroPred(self, term):
     self.float(term._args[0])
 
-  def FPSamePred (self, term):
+  def FPIdenticalPred(self, term):
     self.float(term._args[0])
     self.eq_types(*term._args)
+
+  def FPIntegerPred(self, term):
+    self.float(term._args[0])
 
   IntMinPred = _int_monad
   Power2Pred = _int_monad

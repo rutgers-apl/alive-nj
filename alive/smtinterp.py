@@ -485,7 +485,9 @@ class SMTTranslator(Visitor):
   Log2Cnxp = SizedOpHandler(bv_log2)
   LShrFunCnxp = OpHandler(z3.LShR)
   SMaxCnxp = OpHandler(lambda x,y: z3.If(x > y, x, y))
+  SMinCnxp = OpHandler(lambda x,y: z3.If(x > y, y, x))
   UMaxCnxp = OpHandler(lambda x,y: z3.If(z3.UGT(x,y), x, y))
+  UMinCnxp = OpHandler(lambda x,y: z3.If(z3.UGT(x,y), y, x))
 
   SExtCnxp = SExtInst
   ZExtCnxp = ZExtInst
@@ -498,6 +500,10 @@ class SMTTranslator(Visitor):
     # TODO: fptrunc() range/rounding check
 
   FPTruncCnxp = FPExtCnxp
+
+  def FPMantissaWidthCnxp(self, term):
+    ty = self.type(term._args[0])
+    return z3.BitVecVal(ty.frac, self.type(term).width)
 
   def FPtoSICnxp(self, term): #FIXME
     x = self.eval(term._args[0])
@@ -559,8 +565,12 @@ class SMTTranslator(Visitor):
     lambda x: z3.Not(x == z3.fpMinusZero(x.sort())))
     # or: z3.And(z3.Not(z3.fpIsNegative(x)), z3.Not(z3.fpIsZero(x)))
 
-  def FPSamePred(self, term):
+  def FPIdenticalPred(self, term):
     return self.eval(term._args[0]) == self.eval(term._args[1])
+
+  def FPIntegerPred(self, term):
+    x = self.eval(term._args[0])
+    return x == z3.fpRoundToIntegral(z3.RTZ(), x)
 
   IntMinPred = OpHandler(lambda x: x == 1 << (x.size()-1))
 
