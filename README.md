@@ -42,6 +42,10 @@ Alive-NJ adds these features:
       `fpsame(0.0, -0.0)` is not)
 * Full replaceability of `undef`: If `%x` is `undef`, then `xor %x, %x` is
   `undef`
+* New constant symbols may be defined in the target, for example, 
+  `C2 = trunc(C1)`. These symbols are in scope in the precondition and target,
+  so `zext(C2) == C1` is a valid precondition. Note that, unlike `trunc(C1)`,
+  all uses of `C2` will have the same type.
 
 Alive-NJ does not include, or does not fully implement, these features:
 

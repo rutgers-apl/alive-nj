@@ -6,6 +6,7 @@ from .language import *
 from .typing import TypeConstraints
 from . import pretty
 import logging
+import collections
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,20 @@ class Transform(pretty.PrettyRepr):
   def type_models(self):
     return self.type_constraints().type_models()
 
+  def constant_defs(self):
+    """Generate shared constant terms from the target and precondition.
+
+    Terms are generated before any terms that reference them.
+    """
+
+    uses = count_uses(self.tgt)
+    if self.pre:
+      count_uses(self.pre, uses)
+
+    for t in subterms(self.tgt):
+      if uses[t] > 1 and isinstance(t, Constant) and not isinstance(t, Symbol):
+        yield t
+
   def format(self):
     s = ''
     if self.name:
@@ -56,6 +71,13 @@ class Transform(pretty.PrettyRepr):
       logger.debug('Generated source\n%s\n  %s',
         '\n'.join(src_lines), pretty.pformat(f.ids, indent=2))
 
+    tgt_lines = ['{} = {}'.format(f.name(v), v.accept(f))
+                  for v in self.constant_defs()]
+
+    if tgt_lines and logger.isEnabledFor(logging.DEBUG):
+      logger.debug('Generated constant definitions\n%s\n  %s',
+        '\n'.join(tgt_lines), pretty.pformat(f.ids, indent=2))
+
     if self.pre:
       s += 'Pre: ' + self.pre.accept(f) + '\n'
 
@@ -65,7 +87,7 @@ class Transform(pretty.PrettyRepr):
       f.ids[self.tgt] = self.src.name
 
     tgti = get_insts(self.tgt)
-    tgt_lines = [i.accept(f) for i in tgti if i not in f.ids]
+    tgt_lines.extend(i.accept(f) for i in tgti if i not in f.ids)
 
     if not isinstance(self.tgt, Instruction):
       tgt_lines.append(self.src.name + ' = ' + self.tgt.accept(f))
@@ -93,6 +115,18 @@ def get_insts(v):
   walk(v, insts, seen)
   return insts
 
+def count_uses(dag, uses=None):
+  if uses is None:
+    uses = collections.Counter()
+
+  def walk(v):
+    for a in v.args():
+      if a not in uses:
+        walk(a)
+      uses[a] += 1
+
+  walk(dag)
+  return uses
 
 class Formatter(Visitor):
   def __init__(self):
@@ -103,10 +137,10 @@ class Formatter(Visitor):
   def name(self, term):
     if term in self.ids: return self.ids[term]
 
-    prefix = '%'
+    prefix = 'C' if isinstance(term, Constant) else '%'
+
     if isinstance(term, (Input, Instruction)) and term.name:
       name = term.name
-      prefix = name[0]
     else:
       name = prefix + str(self.fresh)
       self.fresh += 1
@@ -122,8 +156,10 @@ class Formatter(Visitor):
   def operand(self, term, ty = None):
     ty = str(ty) + ' ' if ty else ''
 
-    if isinstance(term, Instruction):
+    if term in self.ids:
       return ty + self.name(term)
+
+    assert not isinstance(term, Instruction)
 
     return ty + term.accept(self)
 

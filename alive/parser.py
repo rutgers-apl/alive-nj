@@ -242,6 +242,22 @@ class FunAst(ValAst, PreconditionAst):
       self.toks[e.idx+1]._fatal('{} {}'.format(name, e))
 
 
+class CDefAst(Ast):
+  """Represents <cname> = <cexpr>."""
+
+  def eval(self, ids, phase):
+    if phase != Phase.Target:
+      self._fatal('Constant definitions only permitted in target')
+
+    c = self.toks.lhs.id
+
+    if c in ids:
+      self._fatal('Redefinition of ' + r)
+
+    val = self.toks.rhs.value(None, ids, phase)
+
+    ids[c] = val
+
 class OpInstAst(Ast):
   'Represents <reg> = <instr>'
 
@@ -519,7 +535,10 @@ opInst.setParseAction(OpInstAst)
 # instr = opInstr | store
 # instr.setName('Instruction')
 
-instr = opInst
+cdef = cname('lhs') + Suppress('=') + cexpr('rhs')
+cdef.setParseAction(CDefAst)
+
+instr = opInst | cdef
 instr.setName('Instruction')
 
 #instrs = OneOrMore(instr - LineEnd().suppress())
@@ -527,26 +546,29 @@ instr.setName('Instruction')
 def parseTransform(s,l,t):
   name = t.name[0] if t.name else ''
 
-  src = collections.OrderedDict()
-  for i in t.src: i.eval(src, Phase.Source)
-  
   root = t.src[-1].name()
 
-  if t.pre[0]:
-    pre = t.pre[0].condition(src)
-  else:
-    pre = None
-  
   if t.tgt[-1].name() != root:
     t.tgt[-1]._fatal('Target root must redefine source (' + root + ')')
 
-  # copy inputs to target, excluding root
-  tgt = src.copy()
-  tgt.pop(root)
+  ids = {}
+  for i in t.src: i.eval(ids, Phase.Source)
 
-  for i in t.tgt: i.eval(tgt, Phase.Target)
+  for i in t.tgt:
+    if isinstance(i, CDefAst):
+      i.eval(ids, Phase.Target)
 
-  return Transform(src[root], tgt[root], pre, name)
+  if t.pre[0]:
+    pre = t.pre[0].condition(ids)
+  else:
+    pre = None
+
+  src = ids.pop(root)
+  for i in t.tgt:
+    if not isinstance(i, CDefAst):
+      i.eval(ids, Phase.Target)
+
+  return Transform(src, ids[root], pre, name)
 
 comment = Literal(';') + restOfLine()
 continuation = '\\' + LineEnd()

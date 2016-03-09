@@ -23,12 +23,12 @@ Name: addsub:1345
 
 
 Name: addsub:1354
-Pre: sitofp(fptosi(C)) == C && WillNotOverflowSignedAdd(%a, fptosi(C)) \
-	 && width(%a) > 1
+Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
 %x = sitofp %a to half
 %r = fadd %x, C
 =>
-%y = add nsw %a, fptosi(C)
+C0 = fptosi(C)
+%y = add nsw %a, C0
 %r = sitofp %y
 
 

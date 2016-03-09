@@ -45,13 +45,13 @@ Name: AddSub:1098
 
 
 Name: AddSub:1111
-Pre: C1 == -C2 && isPowerOf2(C2) && !MaskedValueIsZero(C2, -1 << (width(C1)-(width(C1) - log2(C2) - 1)))
+Pre: C1 == -C2 && isPowerOf2(C2) && !MaskedValueIsZero(C2, -1 << C3)
 %LHS = xor %Y, C2
 %r = add %LHS, C1
   =>
-%ShAmt = width(C1) - (width(C1) - log2(C2) - 1)
-%shl = shl %Y, %ShAmt
-%r = ashr %shl, %ShAmt
+C3 = width(C1) - (width(C1) - log2(C2) - 1)
+%shl = shl %Y, C3
+%r = ashr %shl, C3
 
 
 Name: AddSub:1126-1
