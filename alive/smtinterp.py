@@ -261,7 +261,8 @@ class SMTTranslator(Visitor):
 
   def FPExtInst(self, term):
     v = self.eval(term.arg)
-    return z3.fpToFP(z3.RNE(), v, _ty_sort(self.type(term)))
+    rm = z3.get_default_rounding_mode()
+    return z3.fpToFP(rm, v, _ty_sort(self.type(term)))
     # TODO: fpext range/rounding check
     # TODO: fptrunc range/rounding check
 

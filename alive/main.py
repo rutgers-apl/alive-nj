@@ -4,6 +4,7 @@ import logging, logging.config, argparse, sys
 import os
 import os.path
 import itertools
+import z3
 from . import config
 from . import typing
 from . import refinement
@@ -132,6 +133,35 @@ def read_opt_files(files):
       yield opt
 
 
+rounding_modes = {
+  'rne': z3.RNE,
+  'rna': z3.RNA,
+  'rtp': z3.RTP,
+  'rtz': z3.RTZ,
+  'rtn': z3.RTN,
+}
+
+def verify_opts(opts, quiet=config.quiet, persist=config.persist,
+    translator=config.translator):
+  """Check refinement of each opt in iterable."""
+
+  status_reporter = StatusReporter(quiet, persist)
+
+  for opt in opts:
+    try:
+      status_reporter.begin_opt(opt)
+
+      for m in opt.type_models():
+        refinement.check(opt, m, translator)
+        status_reporter.add_proof()
+
+      status_reporter.end_opt()
+
+    except (refinement.Error, typing.Error) as e:
+      status_reporter.fail_opt(e)
+
+  status_reporter.final_status()
+
 def main():
   logging.config.dictConfig(config.logs)
 
@@ -144,7 +174,11 @@ def main():
     help='only print number of tested and unverified opts')
   parser.add_argument('--translator', action='store',
     default=config.translator,
+    choices=smtinterp.SMTTranslator.registry,
     help='(advanced) pick class for SMT translation')
+  parser.add_argument('-r', '--rounding-mode', action='store',
+    choices=rounding_modes,
+    help='rounding mode for arithmetic')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
     help='file(s) containing Alive optimizations (stdin by default)')
@@ -160,19 +194,8 @@ def main():
     print 'ERROR: Unknown translator:', args.translator
     exit(-1)
 
-  status_reporter = StatusReporter(args.quiet, args.persist)
+  if args.rounding_mode:
+    z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 
-  for opt in read_opt_files(args.file):
-    try:
-      status_reporter.begin_opt(opt)
-
-      for m in opt.type_models():
-        refinement.check(opt, m, args.translator)
-        status_reporter.add_proof()
-
-      status_reporter.end_opt()
-
-    except (refinement.Error, typing.Error) as e:
-      status_reporter.fail_opt(e)
-
-  status_reporter.final_status()
+  verify_opts(read_opt_files(args.file), args.quiet, args.persist,
+    args.translator)
