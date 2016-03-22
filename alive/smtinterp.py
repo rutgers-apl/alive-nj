@@ -652,6 +652,23 @@ class FastMathUndef(SMTTranslator):
 
     return z
 
+class FPImpreciseUndef(SMTTranslator):
+  def SItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    w = 2**(tgt.exp)-1
+
+    if src.width > w:
+      m = (2**tgt.frac-1) << (w - tgt.frac)
+      self.add_defs(v >= -m, v <= m)
+
+    b = self.fresh_bool()
+    self.add_qvar(b)
+    sort = _ty_sort(tgt)
+    return z3.If(b, z3.fpToFP(z3.RTN(), v, sort), z3.fpToFP(z3.RTP(),v,sort))
+
 class FPOverflowUndef(SMTTranslator):
   def SItoFPInst(self, term):
     v = self.eval(term.arg)
