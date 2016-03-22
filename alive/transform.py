@@ -3,7 +3,7 @@ General object representing transformations (optimizations).
 '''
 
 from .language import *
-from .typing import TypeConstraints
+from . import typing
 from . import pretty
 import logging
 import collections
@@ -24,19 +24,35 @@ class Transform(pretty.PrettyRepr):
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)
-    t = TypeConstraints()
+    t = typing.TypeConstraints()
+
+    # find type variables from the source
+    t(self.src)
+#     try:
+#       t.type_models().next()
+#       # FIXME: this triggers warnings for variables constrained to NUMBER
+#       # which will later be constrained by the target
+#     except StopIteration:
+#       raise typing.Error('Unsatisfiable type constraints in source')
+
+    src_reps = tuple(t.sets.reps())
+
     t.eq_types(self.src, self.tgt)
     if self.pre:
-      old_reps = tuple(t.sets.reps())
       self.pre.accept(t)
 
-      # check each set to see if it contains only prefix terms
-      for r in t.sets.reps():
-        if any(t.sets.rep(s) == r for s in old_reps):
-          continue
+    reps = set(t.sets.reps())
+    for r in src_reps:
+      reps.discard(t.sets.rep(r))
 
-        logger.debug('%s: Setting prefix-only term %r', self.name, r)
-        t.specific(r, IntType(64))
+    # TODO: warning for defaulted terms
+    # FIXME: defaulted terms in the target are almost certainly bad
+    for r in reps:
+      if t.constraints.get(r) == typing.BOOL: continue
+
+      logger.debug('%s: Defaulting term %r', self.name, r)
+      t.specific(r, IntType(64))
+      # move this into TypeConstraints?
 
     return t
 
