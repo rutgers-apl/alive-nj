@@ -21,13 +21,16 @@ def check(opt, type_model, translator=config.translator):
   translator = smtinterp.SMTTranslator.registry[translator]
   smt = translator(type_model)
 
-  sv,sd,sp,qvars = smt(opt.src)
-
-  tv,td,tp,_ = smt(opt.tgt)
   if opt.pre:
     pb,pd,_,_ = smt(opt.pre)
-    sd += [pb] + pd
-    # NOTE: should we require sd => pd?
+    pd.append(pb)
+  else:
+    pd = []
+
+  sv,sd,sp,qvars = smt(opt.src)
+  sd += pd
+
+  tv,td,tp,_ = smt(opt.tgt)
 
   def err(c, m):
     return CounterExampleError(c, m, type_model, opt.src, sv, tv, translator)

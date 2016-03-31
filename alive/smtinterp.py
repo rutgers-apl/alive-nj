@@ -6,6 +6,7 @@ from .language import *
 from .z3util import *
 import z3, operator, logging
 import types
+import collections
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,8 @@ class SMTTranslator(Visitor):
     self.defs = []  # current defined-ness conditions
     self.nops = []  # current non-poison conditions
     self.qvars = []
+    self.attrs = collections.defaultdict(dict)
+      # term -> attr -> var
 
   def eval(self, term):
     '''smt.eval(term) -> Z3 expression
@@ -159,8 +162,11 @@ class SMTTranslator(Visitor):
       self.add_defs(*defined(x,y))
 
     if poisons:
-      for f in term.flags:
-        self.add_nops(poisons[f](x,y))
+      for f in poisons:
+        if f in self.attrs[term]:
+          self.add_nops(z3.Implies(self.attrs[term][f], poisons[f](x,y)))
+        elif f in term.flags:
+          self.add_nops(poisons[f](x,y))
 
     return op(x,y)
 
@@ -214,25 +220,41 @@ class SMTTranslator(Visitor):
 
 
   def _float_binary_operator(self, term, op):
+    self.log.debug('_fbo: %s\n%s', term, self.attrs[term])
     x = self.eval(term.x)
     y = self.eval(term.y)
 
-    if 'nnan' in term.flags:
+    if 'nnan' in self.attrs[term]:
+      df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+      self.add_defs(z3.Implies(self.attrs[term]['nnan'], df))
+
+    elif 'nnan' in term.flags:
       self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
         z3.Not(z3.fpIsNaN(op(x,y))))
 
-    if 'ninf' in term.flags:
+    if 'ninf' in self.attrs[term]:
+      df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+      self.add_defs(z3.Implies(self.attrs[term]['ninf'], df))
+
+    elif 'ninf' in term.flags:
       self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
         z3.Not(z3.fpIsInfinite(op(x,y))))
 
-    if 'nsz' in term.flags:
+    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
       # to this term. Is this desirable?
       b = self.fresh_bool()
       self.add_qvar(b)
       z = op(x,y)
+
+      c = z3.fpIsZero(z)
+      if 'nsz' in self.attrs[term]:
+        c = z3.And(self.attrs[term]['nsz'], c)
+
       nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-      return z3.If(z3.fpEQ(z,0), z3.If(b, 0, nz), z)
+      return z3.If(c, z3.If(b, 0, nz), z)
 
     return op(x,y)
 
@@ -572,6 +594,36 @@ class SMTTranslator(Visitor):
     x = self.eval(term._args[0])
     return x == z3.fpRoundToIntegral(z3.RTZ(), x)
 
+  def _has_attr(self, attr, term):
+    if attr in term.flags:
+      return z3.BoolVal(True)
+
+    if attr in self.attrs[term]:
+      return self.attrs[term][attr]
+
+    b = self.fresh_bool()
+    self.log.debug('Creating attr var %s for %s:%s', b, term, attr)
+    self.attrs[term][attr] = b
+    return b
+
+  def HasNInfPred(self, term):
+    return self._has_attr('ninf', term._args[0])
+
+  def HasNNaNPred(self, term):
+    return self._has_attr('nnan', term._args[0])
+
+  def HasNSWPred(self, term):
+    return self._has_attr('nsw', term._args[0])
+
+  def HasNSZPred(self, term):
+    return self._has_attr('nsz', term._args[0])
+
+  def HasNUWPred(self, term):
+    return self._has_attr('nuw', term._args[0])
+
+  def IsExactPred(self, term):
+    return self._has_attr('exact', term._args[0])
+
   IntMinPred = OpHandler(lambda x: x == 1 << (x.size()-1))
 
   Power2Pred = MustAnalysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
@@ -627,22 +679,34 @@ class FastMathUndef(SMTTranslator):
 
     conds = []
     z = op(x,y)
-    if 'nnan' in term.flags:
+    if 'nnan' in self.attrs[term]:
+      conds += [z3.Implies(self.attrs[term]['nnan'],
+        z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y)))))]
+    elif 'nnan' in term.flags:
       conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
         z3.Not(z3.fpIsNaN(op(x,y)))]
 
-    if 'ninf' in term.flags:
+    if 'ninf' in self.attrs[term]:
+      conds += [z3.Implies(self.attrs[term]['ninf'],
+        z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y)))))]
+    elif 'ninf' in term.flags:
       conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
         z3.Not(z3.fpIsInfinite(op(x,y)))]
 
-    if 'nsz' in term.flags:
+    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
       # to this term. Is this desirable?
       b = self.fresh_bool()
       self.add_qvar(b)
       z = op(x,y)
+      c = z3.fpIsZero(z)
+      if 'nsz' in self.attrs[term]:
+        c = z3.And(self.attrs[term]['nsz'], c)
+
       nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-      z = z3.If(z3.fpEQ(z,0), z3.If(b, 0, nz), z)
+      z = z3.If(c, z3.If(b, 0, nz), z)
 
     if conds:
       q = self.fresh_var(self.type(term))

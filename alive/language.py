@@ -196,22 +196,27 @@ class BinaryOperator(Instruction):
 
 class IntBinaryOperator(BinaryOperator): pass
 
-class AddInst(IntBinaryOperator):  code = 'add'
-class SubInst(IntBinaryOperator):  code = 'sub'
-class MulInst(IntBinaryOperator):  code = 'mul'
-class SDivInst(IntBinaryOperator): code = 'sdiv'
-class UDivInst(IntBinaryOperator): code = 'udiv'
-class SRemInst(IntBinaryOperator): code = 'srem'
-class URemInst(IntBinaryOperator): code = 'urem'
-class ShlInst(IntBinaryOperator):  code = 'shl'
-class AShrInst(IntBinaryOperator): code = 'ashr'
-class LShrInst(IntBinaryOperator): code = 'lshr'
-class AndInst(IntBinaryOperator):  code = 'and'
-class OrInst(IntBinaryOperator):   code = 'or'
-class XorInst(IntBinaryOperator):  code = 'xor'
+class WrappingBinaryOperator(IntBinaryOperator): pass
+class InexactBinaryOperator(IntBinaryOperator): pass
+
+class AddInst(WrappingBinaryOperator): code = 'add'
+class SubInst(WrappingBinaryOperator): code = 'sub'
+class MulInst(WrappingBinaryOperator): code = 'mul'
+class SDivInst(InexactBinaryOperator): code = 'sdiv'
+class UDivInst(InexactBinaryOperator): code = 'udiv'
+class SRemInst(IntBinaryOperator):     code = 'srem'
+class URemInst(IntBinaryOperator):     code = 'urem'
+class ShlInst(WrappingBinaryOperator): code = 'shl'
+class AShrInst(InexactBinaryOperator): code = 'ashr'
+class LShrInst(InexactBinaryOperator): code = 'lshr'
+class AndInst(IntBinaryOperator):      code = 'and'
+class OrInst(IntBinaryOperator):       code = 'or'
+class XorInst(IntBinaryOperator):      code = 'xor'
 
 
-class FloatBinaryOperator(BinaryOperator): pass
+class FastMathInst(Instruction): pass
+
+class FloatBinaryOperator(BinaryOperator, FastMathInst): pass
 
 class FAddInst(FloatBinaryOperator): code = 'fadd'
 class FSubInst(FloatBinaryOperator): code = 'fsub'
@@ -263,7 +268,7 @@ class IcmpInst(Instruction):
   def args(self):
     return (self.x, self.y)
 
-class FcmpInst(Instruction):
+class FcmpInst(FastMathInst):
   __slots__ = ('pred','x','y','ty','flags','name')
 
   def __init__(self, pred, arg1, arg2, ty=None, flags=(), name=''):
@@ -561,8 +566,8 @@ class FunPred(Predicate):
       raise BadArgumentCount(len(cls.sig), len(args))
 
     for i in xrange(len(args)):
-      if not isinstance(args[0], cls.sig[0]):
-        raise BadArgumentKind(i, cls.sig[0])
+      if not isinstance(args[i], cls.sig[i]):
+        raise BadArgumentKind(i, cls.sig[i])
 
   def __init__(self, *args):
     self.check_args(args)
@@ -585,6 +590,30 @@ class FPIdenticalPred(FunPred):
 class FPIntegerPred(FunPred):
   sig  = (Constant,)
   code = 'fpInteger'
+
+class HasNInfPred(FunPred):
+  sig  = (FastMathInst,)
+  code = 'hasNoInf'
+
+class HasNNaNPred(FunPred):
+  sig  = (FastMathInst,)
+  code = 'hasNoNaN'
+
+class HasNSWPred(FunPred):
+  sig  = (WrappingBinaryOperator,)
+  code = 'hasNSW'
+
+class HasNSZPred(FunPred):
+  sig  = (FastMathInst,)
+  code = 'hasNSZ'
+
+class HasNUWPred(FunPred):
+  sig  = (WrappingBinaryOperator,)
+  code = 'hasNUW'
+
+class IsExactPred(FunPred):
+  sig  = (InexactBinaryOperator,)
+  code = 'isExact'
 
 class IntMinPred(FunPred): 
   sig  = (Constant,)
@@ -973,6 +1002,15 @@ class BaseTypeConstraints(Visitor):
   def FPIntegerPred(self, term):
     self.float(term._args[0])
 
+  def HasNInfPred(self, term):
+    pass # arg 0 is already constrained
+
+  HasNNaNPred = HasNInfPred
+  HasNSWPred = HasNInfPred
+  HasNSZPred = HasNInfPred
+  HasNUWPred = HasNInfPred
+  IsExactPred = HasNInfPred
+
   IntMinPred = _int_monad
   Power2Pred = _int_monad
   Power2OrZPred = _int_monad
@@ -1013,6 +1051,9 @@ class BadArgumentKind(Exception):
     Value: 'any value',
     Constant: 'constant',
     (Input,Instruction): 'register',
+    FastMathInst: 'floating-point inst',
+    WrappingBinaryOperator: 'add, sub, mul, or shl',
+    InexactBinaryOperator: 'sdiv, udiv, ashr, or lshr',
   }
 
   def __str__(self):
