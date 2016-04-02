@@ -47,7 +47,7 @@ Alive-NJ adds these features:
   so `zext(C2) == C1` is a valid precondition. Note that, unlike `trunc(C1)`,
   all uses of `C2` will have the same type.
 
-We have found the following bugs with Alive-NJ floating point support:
+We have found the following bugs with the floating point support in Alive-NJ:
 
 * https://llvm.org/bugs/show_bug.cgi?id=26863
 * https://llvm.org/bugs/show_bug.cgi?id=27151
