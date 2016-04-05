@@ -253,8 +253,19 @@ class SMTTranslator(Visitor):
       if 'nsz' in self.attrs[term]:
         c = z3.And(self.attrs[term]['nsz'], c)
 
-      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-      return z3.If(c, z3.If(b, 0, nz), z)
+      s = _ty_sort(self.type(term))
+      z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
+
+      if isinstance(term, FDivInst):
+        c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
+        if 'nsz' in self.attrs[term]:
+          c.append(self.attrs[term]['nsz'])
+
+        z = z3.If(z3.And(c),
+          z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
+          z)
+
+      return z
 
     return op(x,y)
 
