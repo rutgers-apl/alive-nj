@@ -1,0 +1,4 @@
+; ERROR: Mismatch in values
+%r = frem half %x, undef
+=>
+%r = undef

@@ -1,0 +1,307 @@
+Name: simplify:802
+%r = fadd %x, -0.0
+=>
+%r = %x
+
+Name: simplify:806
+Pre: hasNSZ(%r) || CannotBeNegativeZero(%x)
+%r = fadd %x, 0
+=>
+%r = %x
+
+; Name: simplfy:806-1
+; %r = fadd nsz %x, 0.0
+; =>
+; %r = %x
+; 
+; Name: simplify:806-2
+; Pre: CannotBeNegativeZero(%x)
+; %r = fadd %x, 0.0
+; =>
+; %r = %x
+
+; Name: simplify:813
+; Pre: C == 0.0 && (hasNoInf(%0) || hasNoInf(%r)) && \
+;   (hasNoNaN(%0) || hasNoNaN(%r))
+; %0 = fsub C, %x
+; %r = fadd %0, %x
+; =>
+; %r = 0.0
+
+Name: simplify:813-1
+Pre: C == 0.0
+%0 = fsub C, %x
+%r = fadd nnan ninf %0, %x
+=>
+%r = 0.0
+
+; Name: simplify:813-2
+; Pre: C == 0.0
+; %0 = fsub nnan ninf C, %x
+; %r = fadd %0, %x
+; =>
+; %r = 0.0
+
+Name: simplify:813-3
+Pre: C == 0.0
+%0 = fsub nnan C, %x
+%r = fadd ninf %0, %x
+=>
+%r = 0.0
+
+Name: simplify:813-4
+Pre: C == 0.0
+%0 = fsub ninf C, %x
+%r = fadd nnan %0, %x
+=>
+%r = 0.0
+
+Name: simplify:841
+%r = fsub %x, 0.0
+=>
+%r = %x
+
+Name: simplify:845
+Pre: CannotBeNegativeZero(%x) || hasNSZ(%r)
+%r = fsub %x, -0.0
+=>
+%r = %x
+
+; Name: simplify:845-1
+; %r = fsub nsz %x, -0.0
+; =>
+; %r = %x
+; 
+; Name: simplify:845-2
+; Pre: CannotBeNegativeZero(%x)
+; %r = fsub %x, -0.0
+; =>
+; %r = %x
+
+; Name: simplify:851-1  ; Bug?
+; Pre: C == 0.0
+; %1 = fsub -0.0, %x
+; %r = fsub C, %1
+; =>
+; %r = %x
+
+Name: simplify:851-2
+Pre: C == 0.0 && C1 == 0.0
+%1 = fsub C1, %x
+%r = fsub nsz C, %1
+=>
+%r = %x
+
+Name: simplify:859
+%r = fsub nnan %x, %x
+=>
+%r = 0.0
+
+Name: simplify:882
+%r = fmul %x, 1
+=>
+%r = %x
+
+Name: simplify:886
+Pre: C == 0.0
+%r = fmul nnan nsz %x, C
+=>
+%r = C
+
+; Name: simplify:1117  ; seems wrong
+; %r = fdiv undef, %x
+; =>
+; %r = undef
+; 
+; Name: simplify:1121  ; seems wrong
+; %r = fdiv %x, undef
+; =>
+; %r = undef
+
+; n.b., +0 / 1 = +0, +0 / -1 = -0
+Name: simplify:1127
+Pre: C == 0
+%r = fdiv nnan nsz half C, %x
+=>
+%r = C
+
+Name: simplify:1132
+%r = fdiv nnan half %a, %a
+=>
+%r = 1
+
+Name: simplify:1138-1
+Pre: C == 0
+%na = fsub half C, %a
+%r  = fdiv nnan %na, %a
+=>
+%r  = -1
+
+Name: simplify:1138-2
+Pre: C == 0
+%na = fsub half C, %a
+%r  = fdiv nnan %a, %na
+=>
+%r  = -1
+
+; ; seems wrong: surely the source can't produce a value
+; ; larger than %x
+; Name: simplify:1257  ; seems wrong
+; %r = frem undef, %x
+; =>
+; %r = undef
+; 
+; ; again, the output is limited by %x
+; Name: simplify:1261  ; seems wrong
+; %r = frem %x, undef
+; =>
+; %r = undef
+
+
+; @@ LLVM has nsz here, which seems unnecessary
+Name: simplify:1267
+Pre: C == 0
+%r = frem nnan half C, %x
+=>
+%r = C
+
+
+Name: simplify:3065
+%r = fcmp false %a, %b
+=>
+%r = false
+
+Name: simplify:3067
+%r = fcmp true %a, %b
+=>
+%r = true
+
+Name: simplify:3073
+%r = fcmp nnan uno %a, %b
+=>
+%r = false
+
+Name: simplify:3074
+%r = fcmp nnan ord %a, %b
+=>
+%r = true
+
+
+Name: simplify:3080-1
+; TODO: symmetric and applies to all ordered predicates
+; n.b., only correct if shadowed by simplify:3074
+%r = fcmp ord %a, undef
+=>
+%r = false
+
+Name: simplify:3080-2
+; TODO: symmetric and applies to all unordered predicates
+; n.b., only correct if shadowed by simplify:3073
+%r = fcmp uno %a, undef
+=>
+%r = true
+
+; omitted: true handled by simplify:3067
+Name: simplify:3088-1
+%r = fcmp ueq %a, %a
+=>
+%r = true
+
+Name: simplify:3088-2
+%r = fcmp uge %a, %a
+=>
+%r = true
+
+Name: simplify:3088-3
+%r = fcmp ule %a, %a
+=>
+%r = true
+
+; omitted: false handled by simplify:3065
+Name: simplify:3090-1
+%r = fcmp one %a, %a
+=>
+%r = false
+
+Name: simplify:3090-2
+%r = fcmp ogt %a, %a
+=>
+%r = false
+
+Name: simplify:3090-3
+%r = fcmp olt %a, %a
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp oeq %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp oge %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ogt %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ole %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp olt %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp one %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ord %a, nan
+=>
+%r = false
+
+
+Name: simplify:3100
+%r = fcmp ueq %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp uge %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ugt %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ule %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ult %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp une %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp uno %a, nan
+=>
+%r = true
+
+

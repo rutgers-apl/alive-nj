@@ -1,0 +1,8 @@
+; ERROR: Mismatch in values
+Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
+%x = sitofp i16 %a to half
+%r = fadd %x, C
+=>
+C0 = fptosi(C)
+%y = add nsw %a, C0
+%r = sitofp %y

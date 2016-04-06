@@ -1,0 +1,4 @@
+; ERROR: Mismatch in values
+%r = fdiv half %x, undef
+=>
+%r = undef
