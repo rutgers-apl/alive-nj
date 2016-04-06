@@ -275,6 +275,26 @@ class SMTTranslator(Visitor):
   FDivInst = FBinOpHandler(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
   FRemInst = FBinOpHandler(z3.fpRem)
 
+  def BitcastInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    if src == tgt:  # no-op
+      return v
+
+    if isinstance(src, (IntType,PtrType)) and \
+        isinstance(tgt, (IntType,PtrType)):
+      return v  # also a no-op
+
+    if isinstance(src, (IntType,PtrType)) and isinstance(tgt, FloatType):
+      return z3.fpToFP(v, _ty_sort(tgt))
+
+    if isinstance(src, FloatType) and isinstance(tgt, (IntType,PtrType)):
+      return z3.fpToIEEEBV(v)
+
+    assert False
+
   # NOTE: SExt/ZExt/Trunc should all have IntType args
   SExtInst = SizedOpHandler(lambda size, x: z3.SignExt(size - x.size(), x))
   ZExtInst = SizedOpHandler(lambda size, x: z3.ZeroExt(size - x.size(), x))

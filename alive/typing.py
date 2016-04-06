@@ -66,6 +66,7 @@ class TypeConstraints(object):
     self.specifics = {}
     self.constraints = collections.defaultdict(lambda: FIRST_CLASS)
     self.ordering = set() # pairs (x,y) where width(x) < width(y)
+    self.width_equalities = set() # pairs (x,y) where width(x) == width(y)
     self.widthlimit = maxwidth+1
 
   def __call__(self, term):
@@ -157,6 +158,11 @@ class TypeConstraints(object):
     self.ensure(hi)
     self.ordering.add((lo,hi))
 
+  def width_equal(self, a, b):
+    self.ensure(a)
+    self.ensure(b)
+    self.width_equalities.add((a,b))
+
   def validate(self):
     '''Make sure specific types meet constraints'''
     
@@ -174,20 +180,44 @@ class TypeConstraints(object):
   def simplify_orderings(self):
     if self.logger.isEnabledFor(logging.DEBUG):
       self.logger.debug('simplifying ordering:\n  ' + 
-        pretty.pformat(self.ordering, indent=2))
+        pretty.pformat(self.ordering, indent=2) +
+        '\n  equalities:\n' + pretty.pformat(self.width_equalities, indent=2))
 
     ords = { (lo if isinstance(lo, int) else self.sets.rep(lo), self.sets.rep(hi))
               for (lo,hi) in self.ordering }
 
+    eqs = { (self.sets.rep(a), self.sets.rep(b))
+      for (a,b) in self.width_equalities if a != b }
+    eqs = { (a,b) if id(a) < id(b) else (b,a) for (a,b) in eqs}
+
     if self.logger.isEnabledFor(logging.DEBUG):
       self.logger.debug('simplified ordering:\n  ' + 
-        pretty.pformat(ords, indent=2))
+        pretty.pformat(ords, indent=2) +
+        '\n  equalities:\n' + pretty.pformat(eqs, indent=2))
 
     assert all(isinstance(lo, int) or
       most_specific(self.constraints[lo], self.constraints[hi]) is not None
       for (lo, hi) in ords)
 
     self.ordering = ords
+    self.width_equalities = eqs
+
+  def bits(self, ty):
+    """Return the size of the type in bits."""
+    # this is in the class in case we want to do something with pointers,
+    # but maybe it should be in model?
+
+    if isinstance(ty, IntType):
+      return ty.width
+    if isinstance(ty, FloatType):
+      return ty.exp + ty.frac
+      # true for all current floats: the sign bit and the implicit fraction
+      # bit cancel out
+    if isinstance(ty, PtrType):
+      return 64
+
+    assert False
+
 
   def type_models(self):
     self.logger.debug('generating models')
@@ -227,6 +257,13 @@ class TypeConstraints(object):
           IntType(lo),
           model[hi]))
 
+    for a,b in self.width_equalities:
+      if a in model and b in model and \
+          self.bits(model[a]) != self.bits(model[b]):
+        raise Error('Incompatible constraints for {} and {}'.format(
+          a.name if hasattr(a, 'name') else str(a),
+          b.name if hasattr(b, 'name') else str(b)))
+
     vars = tuple(r for r in self.sets.reps() if r not in self.specifics)
     if logger.isEnabledFor(logging.DEBUG):
       self.logger.debug('variables:\n  ' + pretty.pformat(vars, indent=2))
@@ -245,6 +282,8 @@ class TypeConstraints(object):
       return
 
     v = vars[n]
+    self.logger.debug('Enumerating %s', v)
+
     con = self.constraints[v]
     if con == FIRST_CLASS:
       tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),), self.float_tys)
@@ -284,6 +323,15 @@ class TypeConstraints(object):
       tys = (IntType(1),)
     else:
       assert False
+
+    for (a,b) in self.width_equalities:
+      assert a != b
+      if a == v and b in model:
+        self.logger.debug('Constrain %s to %s', v, model[b])
+        tys = (ty for ty in tys if self.bits(ty) == self.bits(model[b]))
+      elif b == v and a in model:
+        self.logger.debug('Constrain %s to %s', v, model[a])
+        tys = (ty for ty in tys if self.bits(ty) == self.bits(model[a]))
 
     for ty in tys:
       model[v] = ty

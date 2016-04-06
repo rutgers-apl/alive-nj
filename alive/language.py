@@ -253,6 +253,14 @@ class ConversionInst(Instruction):
   def args(self):
     return (self.arg,)
 
+class BitcastInst(ConversionInst):
+  code = 'bitcast'
+
+  def type_constraints(self, tcs):
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_equal(self.arg, self)
+
 class SExtInst(ConversionInst):
   code = 'sext'
 
