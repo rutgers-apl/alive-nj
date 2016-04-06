@@ -164,6 +164,9 @@ class Node(pretty.PrettyRepr):
 
     return type(self)(*args)
 
+  def type_constraints(self, tcs):
+    raise NotImplementedError(type(self).__name__ + \
+      ' should override type_constraints')
 
 class Value(Node):
   pass
@@ -176,6 +179,9 @@ class Input(Value):
   
   def args(self):
     return ()
+
+  def type_constraints(self, tcs):
+    tcs.first_class(self)
 
 class Instruction(Value):
   pass
@@ -194,7 +200,11 @@ class BinaryOperator(Instruction):
   def args(self):
     return (self.x, self.y)
 
-class IntBinaryOperator(BinaryOperator): pass
+class IntBinaryOperator(BinaryOperator):
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.specific(self, self.ty)
+    tcs.eq_types(self, self.x, self.y)
 
 class WrappingBinaryOperator(IntBinaryOperator): pass
 class InexactBinaryOperator(IntBinaryOperator): pass
@@ -216,7 +226,12 @@ class XorInst(IntBinaryOperator):      code = 'xor'
 
 class FastMathInst(Instruction): pass
 
-class FloatBinaryOperator(BinaryOperator, FastMathInst): pass
+class FloatBinaryOperator(BinaryOperator, FastMathInst):
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.specific(self, self.ty)
+    tcs.eq_types(self, self.x, self.y)
+
 
 class FAddInst(FloatBinaryOperator): code = 'fadd'
 class FSubInst(FloatBinaryOperator): code = 'fsub'
@@ -241,19 +256,97 @@ class ConversionInst(Instruction):
 class SExtInst(ConversionInst):
   code = 'sext'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_order(self.arg, self)
+
 class ZExtInst(ConversionInst):
   code = 'zext'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_order(self.arg, self)
 
 class TruncInst(ConversionInst):
   code = 'trunc'
 
-class ZExtOrTruncInst(ConversionInst): code = 'ZExtOrTrunc'
-class FPtoSIInst(ConversionInst): code = 'fptosi'
-class FPtoUIInst(ConversionInst): code = 'fptoui'
-class SItoFPInst(ConversionInst): code = 'sitofp'
-class UItoFPInst(ConversionInst): code = 'uitofp'
-class FPTruncInst(ConversionInst): code = 'fptrunc'
-class FPExtInst(ConversionInst): code = 'fpext'
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_order(self, self.arg)
+
+class ZExtOrTruncInst(ConversionInst):
+  code = 'ZExtOrTrunc'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+
+class FPtoSIInst(ConversionInst):
+  code = 'fptosi'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.float(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+
+class FPtoUIInst(ConversionInst):
+  code = 'fptoui'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.float(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+
+class SItoFPInst(ConversionInst):
+  code = 'sitofp'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+
+class UItoFPInst(ConversionInst):
+  code = 'uitofp'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+
+class FPTruncInst(ConversionInst):
+  code = 'fptrunc'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.float(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_order(self, self.arg)
+
+class FPExtInst(ConversionInst):
+  code = 'fpext'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.integer(self.arg)
+    tcs.specific(self, self.ty)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.width_order(self.arg, self)
 
 class IcmpInst(Instruction):
   __slots__ = ('pred', 'x', 'y', 'ty', 'name')
@@ -267,6 +360,12 @@ class IcmpInst(Instruction):
 
   def args(self):
     return (self.x, self.y)
+
+  def type_constraints(self, tcs):
+    tcs.bool(self)
+    tcs.int_ptr_vec(self.x)
+    tcs.specific(self.x, self.ty)
+    tcs.eq_types(self.x, self.y)
 
 class FcmpInst(FastMathInst):
   __slots__ = ('pred','x','y','ty','flags','name')
@@ -282,6 +381,12 @@ class FcmpInst(FastMathInst):
   def args(self):
     return (self.x, self.y)
 
+  def type_constraints(self, tcs):
+    tcs.bool(self)
+    tcs.float(self.x)
+    tcs.specific(self.x, self.ty)
+    tcs.eq_types(self.x, self.y)
+
 class SelectInst(Instruction):
   __slots__ = ('sel', 'arg1', 'arg2', 'ty1', 'ty2', 'name')
 
@@ -296,6 +401,13 @@ class SelectInst(Instruction):
   def args(self):
     return (self.sel, self.arg1, self.arg2)
 
+  def type_constraints(self, tcs):
+    tcs.bool(self.sel)
+    tcs.first_class(self)
+    tcs.specific(self.arg1, self.ty1)
+    tcs.specific(self.arg2, self.ty2)
+    tcs.eq_types(self, self.arg1, self.arg2)
+
 # Constants
 # ---------
 
@@ -305,7 +417,10 @@ class Constant(Value):
 class Symbol(Input, Constant):
   '''Symbolic constants.
   '''
-  pass
+  
+  def type_constraints(self, tcs):
+    tcs.number(self)
+
 # These behave like Inputs. In particular, Symbol defaults to Input in
 # visitors. Having a separate class that inherits from both avoids the
 # need for code like
@@ -322,7 +437,17 @@ class Literal(Constant):
   def args(self):
     return ()
 
-class FLiteral(Constant): pass
+  def type_constraints(self, tcs):
+    tcs.number(self)
+
+    x = self.val
+    bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
+    if bl > 0:
+      tcs.width_order(bl-1, self) # bl-1 because the ceiling is a hard limit
+
+class FLiteral(Constant):
+  def type_constraints(self, tcs):
+    tcs.float(self)
 
 class FLiteralNaN(FLiteral): val = 'nan'
 class FLiteralPlusInf(FLiteral): val = 'inf'
@@ -350,8 +475,13 @@ class UndefValue(Constant):
   def args(self):
     return ()
 
+  def type_constraints(self, tcs):
+    tcs.first_class(self)
+    tcs.specific(self, self.ty)
+
 class PoisonValue(Constant):
-  pass
+  def type_constraints(self, tcs):
+    tcs.first_class(self)
 
 class BinaryCnxp(Constant):
   __slots__ = ('x','y')
@@ -361,12 +491,21 @@ class BinaryCnxp(Constant):
     self.x = x
     self.y = y
 
-class AddCnxp(BinaryCnxp):  code = '+'
-class SubCnxp(BinaryCnxp):  code = '-'
-class MulCnxp(BinaryCnxp):  code = '*'
-class SDivCnxp(BinaryCnxp): code = '/'
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, self.x, self.y)
+
+class NumBinaryCnxp(BinaryCnxp):
+  def type_constraints(self, tcs):
+    tcs.number(self)
+    tcs.eq_types(self, self.x, self.y)
+
+class AddCnxp(NumBinaryCnxp):  code = '+'
+class SubCnxp(NumBinaryCnxp):  code = '-'
+class MulCnxp(NumBinaryCnxp):  code = '*'
+class SDivCnxp(NumBinaryCnxp): code = '/'
 class UDivCnxp(BinaryCnxp): code = '/u'
-class SRemCnxp(BinaryCnxp): code = '%'
+class SRemCnxp(NumBinaryCnxp): code = '%'
 class URemCnxp(BinaryCnxp): code = '%u'
 class ShlCnxp(BinaryCnxp):  code = '<<'
 class AShrCnxp(BinaryCnxp): code = '>>'
@@ -384,9 +523,19 @@ class UnaryCnxp(Constant):
   def __init__(self, x):
     self.x = x
 
-class NegCnxp(UnaryCnxp): code = '-'
-class NotCnxp(UnaryCnxp): code = '~'
+class NegCnxp(UnaryCnxp):
+  code = '-'
 
+  def type_constraints(self, tcs):
+    tcs.number(self)
+    tcs.eq_types(self, self.x)
+
+class NotCnxp(UnaryCnxp):
+  code = '~'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, self.x)
 
 class FunCnxp(Constant):
   __slots__ = ('_args',)
@@ -415,93 +564,190 @@ class AbsCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'abs'
 
+  def type_constraints(self, tcs):
+    tcs.number(self)
+    tcs.eq_types(self, self._args[0])
+
 class SignBitsCnxp(FunCnxp):
   sig  = (Value,)
   code = 'ComputeNumSignBits'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
 
 class OneBitsCnxp(FunCnxp):
   sig  = (Value,)
   code = 'computeKnownOneBits'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, self._args[0])
+
 class ZeroBitsCnxp(FunCnxp):
   sig  = (Value,)
   code = 'computeKnownZeroBits'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, self._args[0])
 
 class LeadingZerosCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'countLeadingZeros'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
+
 class TrailingZerosCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'countTrailingZeros'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
 
 class FPMantissaWidthCnxp(FunCnxp):
   sig  = (Value,)
   code = 'fpMantissaWidth'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.float(self._args[0])
+
 class LShrFunCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'lshr'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, *self._args)
 
 class Log2Cnxp(FunCnxp):
   sig  = (Constant,)
   code = 'log2'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
+
 class SMaxCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'max'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, *self._args)
 
 class SMinCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'min'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, *self._args)
+
 class SExtCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'sext'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
+    tcs.width_order(self._args[0], self)
 
 class TruncCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'trunc'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
+    tcs.width_order(self, self._args[0])
+
 class UMaxCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'umax'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, *self._args)
 
 class UMinCnxp(FunCnxp):
   sig  = (Constant, Constant)
   code = 'umin'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.eq_types(self, *self._args)
+
 class WidthCnxp(FunCnxp):
   sig  = (Value,)
   code = 'width'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
 
 class ZExtCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'zext'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.integer(self._args[0])
+    tcs.width_order(self._args[0], self)
+
 class FPExtCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'fpext'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.float(self._args[0])
+    tcs.width_order(self, self._args[0])
 
 class FPTruncCnxp(FunCnxp):
   sig  = (Constant,)
   code = 'fptrunc'
 
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.float(self._args[0])
+    tcs.width_order(self._args[0], self)
+
 class FPtoSICnxp(FunCnxp):
   sig  = (Constant,)
   code = 'fptosi'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.float(self._args[0])
 
 class FPtoUICnxp(FunCnxp):
   sig   = (Constant,)
   code  = 'fptoui'
 
+  def type_constraints(self, tcs):
+    tcs.integer(self)
+    tcs.float(self._args[0])
+
 class SItoFPCnxp(FunCnxp):
   sig   = (Constant,)
   code  = 'sitofp'
 
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.integer(self._args[0])
+
 class UItoFPCnxp(FunCnxp):
   sig   = (Constant,)
   code  = 'uitofp'
+
+  def type_constraints(self, tcs):
+    tcs.float(self)
+    tcs.integer(self._args[0])
 
 # Predicates
 # ----------
@@ -521,6 +767,10 @@ class AndPred(Predicate):
   def args(self):
     return self.clauses
 
+  def type_constraints(self, tcs):
+    for p in self.clauses:
+      p.type_constraints(tcs)
+
 TruePred = AndPred()
 
 class OrPred(Predicate):
@@ -535,6 +785,10 @@ class OrPred(Predicate):
   def args(self):
     return self.clauses
 
+  def type_constraints(self, tcs):
+    for p in self.clauses:
+      p.type_constraints(tcs)
+
 class NotPred(Predicate):
   __slots__ = ('p',)
 
@@ -543,6 +797,9 @@ class NotPred(Predicate):
 
   def args(self):
     return (self.p,)
+
+  def type_constraints(self, tcs):
+    self.p.type_constraints(tcs)
 
 class Comparison(Predicate):
   __slots__ = ('op','x','y')
@@ -555,6 +812,16 @@ class Comparison(Predicate):
 
   def args(self):
     return (self.x, self.y)
+
+  def type_constraints(self, tcs):
+    # FIXME
+    if self.op[0] == 'u':
+      tcs.integer(self.x)
+      # unsigned comparisons are integer-only
+      # note that ugt could also be unordered greater-than
+    else:
+      tcs.number(self.x)
+    tcs.eq_types(self.x, self.y)
 
 class FunPred(Predicate):
   __slots__ = ('_args',)
@@ -579,93 +846,154 @@ class FunPred(Predicate):
   def args(self):
     return self._args
 
+def _none(term, tcs):
+  pass
+
+def _one_int(term, tcs):
+  tcs.integer(term._args[0])
+
+def _all_ints(term, tcs):
+  tcs.integer(term._args[0])
+  tcs.eq_types(*term._args)
+
+def _one_float(term, tcs):
+  tcs.float(term._args[0])
+
+def _all_floats(term, tcs):
+  tcs.float(term._args[0])
+  tcs.eq_types(*term._args)
+
 class CannotBeNegativeZeroPred(FunPred):
   sig  = (Value,)
   code = 'CannotBeNegativeZero'
+
+  type_constraints = _one_float
 
 class FPIdenticalPred(FunPred):
   sig  = (Constant, Constant)
   code = 'fpIdentical'
 
+  type_constraints = _all_floats
+
 class FPIntegerPred(FunPred):
   sig  = (Constant,)
   code = 'fpInteger'
+
+  type_constraints = _one_float
 
 class HasNInfPred(FunPred):
   sig  = (FastMathInst,)
   code = 'hasNoInf'
 
+  type_constraints = _none
+
 class HasNNaNPred(FunPred):
   sig  = (FastMathInst,)
   code = 'hasNoNaN'
+
+  type_constraints = _none
 
 class HasNSWPred(FunPred):
   sig  = (WrappingBinaryOperator,)
   code = 'hasNSW'
 
+  type_constraints = _none
+
 class HasNSZPred(FunPred):
   sig  = (FastMathInst,)
   code = 'hasNSZ'
+
+  type_constraints = _none
 
 class HasNUWPred(FunPred):
   sig  = (WrappingBinaryOperator,)
   code = 'hasNUW'
 
+  type_constraints = _none
+
 class IsExactPred(FunPred):
   sig  = (InexactBinaryOperator,)
   code = 'isExact'
+
+  type_constraints = _none
 
 class IntMinPred(FunPred): 
   sig  = (Constant,)
   code = 'isSignBit'
 
+  type_constraints = _one_int
+
 class Power2Pred(FunPred):
   sig   = (Value,)
   code  = 'isPowerOf2'
+
+  type_constraints = _one_int
 
 class Power2OrZPred(FunPred):
   sig   = (Value,)
   code  = 'isPowerOf2OrZero'
 
+  type_constraints = _one_int
+
 class ShiftedMaskPred(FunPred):
   sig   = (Constant,)
   code  = 'isShiftedMask'
+
+  type_constraints = _one_int
 
 class MaskZeroPred(FunPred):
   sig   = (Value, Constant)
   code  = 'MaskedValueIsZero'
 
+  type_constraints = _all_ints
+
 class NSWAddPred(FunPred):
   sig   = (Value, Value)
   code  = 'WillNotOverflowSignedAdd'
+
+  type_constraints = _all_ints
 
 class NUWAddPred(FunPred):
   sig   = (Value, Value)
   code  = 'WillNotOverflowUnsignedAdd'
 
+  type_constraints = _all_ints
+
 class NSWSubPred(FunPred):
   sig   = (Value, Value)
   code  = 'WillNotOverflowSignedSub'
+
+  type_constraints = _all_ints
 
 class NUWSubPred(FunPred):
   sig   = (Value, Value)
   code  = 'WillNotOverflowUnsignedSub'
 
+  type_constraints = _all_ints
+
 class NSWMulPred(FunPred):
   sig   = (Constant, Constant)
   code  = 'WillNotOverflowSignedMul'
+
+  type_constraints = _all_ints
 
 class NUWMulPred(FunPred):
   sig   = (Constant, Constant)
   code  = 'WillNotOverflowUnsignedMul'
 
+  type_constraints = _all_ints
+
 class NUWShlPred(FunPred):
   sig   = (Constant, Constant)
   code  = 'WillNotOverflowUnsignedShl'
 
+  type_constraints = _all_ints
+
 class OneUsePred(FunPred):
   sig   = ((Input, Instruction),)  # NOTE: one arg that is Input or Instruction
   code  = 'hasOneUse'
+
+  type_constraints = _none
 
 # Utilities
 # ---------
@@ -732,300 +1060,6 @@ class Visitor(object):
     raise UnmatchedCase('Visitor {0!r} cannot handle class {1!r}'.format(
       type(self).__name__, type(term).__name__))
 
-
-# Type constraints
-# ----------------
-
-def _int_monad(self, term):
-  self.integer(term._args[0])
-
-def _int_pred(self, term):
-  self.integer(term._args[0])
-  self.eq_types(*term._args)
-
-class BaseTypeConstraints(Visitor):
-  def Input(self, term):
-    self.first_class(term)
-
-  def Symbol(self, term):
-    self.number(term)
-
-  def IntBinaryOperator(self, term):
-    self.specific(term, term.ty)
-    self.eq_types(term, term.x, term.y)
-    self.integer(term)
-
-  def FloatBinaryOperator(self, term):
-    self.float(term)
-    self.specific(term, term.ty)
-    self.eq_types(term, term.x, term.y)
-
-  def SExtInst(self, term):
-    self.ZExtInst(term)
-
-  def ZExtInst(self, term):
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-    self.integer(term)
-    self.integer(term.arg)
-    self.width_order(term.arg, term)
-
-  def TruncInst(self, term):
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-    self.integer(term)
-    self.integer(term.arg)
-    self.width_order(term, term.arg)
-
-  def ZExtOrTruncInst(self, term):
-    self.integer(term)
-    self.integer(term.arg)
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-
-  def FPtoSIInst(self, term):
-    self.integer(term)
-    self.float(term.arg)
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-
-  def FPtoUIInst(self, term):
-    self.integer(term)
-    self.float(term.arg)
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-
-  def SItoFPInst(self, term):
-    self.float(term)
-    self.integer(term.arg)
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-
-  def FPExtInst(self, term):
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-    self.float(term)
-    self.float(term.arg)
-    self.width_order(term.arg, term)
-
-  def FPTruncInst(self, term):
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-    self.float(term)
-    self.float(term.arg)
-    self.width_order(term, term.arg)
-
-  def UItoFPInst(self, term):
-    self.float(term)
-    self.integer(term.arg)
-    self.specific(term, term.ty)
-    self.specific(term.arg, term.src_ty)
-
-  def IcmpInst(self, term):
-    self.bool(term)
-    self.int_ptr_vec(term.x)
-    self.specific(term.x, term.ty)
-    self.eq_types(term.x, term.y)
-
-  def FcmpInst(self, term):
-    self.bool(term)
-    self.float(term.x)
-    self.specific(term.x, term.ty)
-    self.eq_types(term.x, term.y)
-
-  def SelectInst(self, term):
-    self.bool(term.sel)
-    self.first_class(term.arg1)
-    self.specific(term.arg1, term.ty1)
-    self.specific(term.arg2, term.ty2)
-    self.eq_types(term, term.arg1, term.arg2)
-
-  def Literal(self, term):
-    self.number(term)
-
-    x = term.val
-    bl = x.bit_length() if x >= 0 else (-x-1).bit_length()+1
-    if bl > 0:
-      self.width_order(bl-1, term)  # bl-1 because the ceiling is a hard limit
-
-  def FLiteral(self, term):
-    self.float(term)
-    # TODO: set minimum float size?
-
-  def UndefValue(self, term):
-    self.first_class(term)
-    self.specific(term, term.ty)
-
-  def PoisonValue(self, term):
-    self.first_class(term)
-
-  def BinaryCnxp(self, term):
-    # FIXME
-    if isinstance(term, (AddCnxp, SubCnxp, MulCnxp, SDivCnxp, SRemCnxp)):
-      self.number(term)
-    else:
-      self.integer(term)
-    self.eq_types(term, term.x, term.y)
-
-  def NegCnxp(self, term):
-    self.number(term)
-    self.eq_types(term, term.x)
-
-  def NotCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, term.x)
-
-  def AbsCnxp(self, term):
-    self.number(term)
-    self.eq_types(term, term._args[0])
-
-  def SignBitsCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-
-  def OneBitsCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, term._args[0])
-
-  def ZeroBitsCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, term._args[0])
-
-  def LeadingZerosCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-
-  def TrailingZerosCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-
-  def FPMantissaWidthCnxp(self, term):
-    self.float(term._args[0])
-    self.integer(term)
-
-  def LShrFunCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, *term._args)
-
-  def Log2Cnxp(self, term):
-    self.integer(term)
-    self.integer(term)
-
-  def SMaxCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, *term._args)
-
-  SMinCnxp = SMaxCnxp
-
-  def UMaxCnxp(self, term):
-    self.integer(term)
-    self.eq_types(term, *term._args)
-
-  UMinCnxp = UMaxCnxp
-
-  def SExtCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-    self.width_order(term._args[0], term)
-
-  def ZExtCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-    self.width_order(term._args[0], term)
-
-  def TruncCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-    self.width_order(term, term._args[0])
-
-  def FPtoSICnxp(self, term):
-    self.float(term._args[0])
-    self.integer(term)
-
-  def FPtoUICnxp(self, term):
-    self.float(term._args[0])
-    self.integer(term)
-
-  def SItoFPCnxp(self, term):
-    self.integer(term._args[0])
-    self.float(term)
-
-  def UItoFPCnxp(self, term):
-    self.integer(term._args[0])
-    self.float(term)
-
-  def FPExtCnxp(self, term):
-    self.float(term)
-    self.float(term._args[0])
-    self.width_order(term, term._args[0])
-
-  def FPTruncCnxp(self, term):
-    self.float(term)
-    self.float(term._args[0])
-    self.width_order(term, term._args[0])
-
-  def WidthCnxp(self, term):
-    self.integer(term)
-    self.integer(term._args[0])
-    # NOTE: return type of width may be too small to hold value
-    # NOTE: should we allow width of pointers?
-    # NOTE: should we allow width() to return fp?
-
-  def AndPred(self, term):
-    for p in term.clauses:
-      p.accept(self)
-
-  def OrPred(self, term):
-    for p in term.clauses:
-      p.accept(self)
-
-  def NotPred(self, term):
-    term.p.accept(self)
-
-  def Comparison(self, term):
-    # FIXME
-    if term.op[0] == 'u':
-      self.integer(term.x)
-      # unsigned comparisons are integer-only
-      # note that ugt could also be unordered greater-than
-    else:
-      self.number(term.x)
-    self.eq_types(term.x, term.y)
-
-  def CannotBeNegativeZeroPred(self, term):
-    self.float(term._args[0])
-
-  def FPIdenticalPred(self, term):
-    self.float(term._args[0])
-    self.eq_types(*term._args)
-
-  def FPIntegerPred(self, term):
-    self.float(term._args[0])
-
-  def HasNInfPred(self, term):
-    pass # arg 0 is already constrained
-
-  HasNNaNPred = HasNInfPred
-  HasNSWPred = HasNInfPred
-  HasNSZPred = HasNInfPred
-  HasNUWPred = HasNInfPred
-  IsExactPred = HasNInfPred
-
-  IntMinPred = _int_monad
-  Power2Pred = _int_monad
-  Power2OrZPred = _int_monad
-  ShiftedMaskPred = _int_monad
-  MaskZeroPred = _int_pred
-  NSWAddPred = _int_pred
-  NUWAddPred = _int_pred
-  NSWSubPred = _int_pred
-  NUWSubPred = _int_pred
-  NSWMulPred = _int_pred
-  NUWMulPred = _int_pred
-  NUWShlPred = _int_pred
-  
-  def OneUsePred(self, term):
-    pass
 
 
 # Errors

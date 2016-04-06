@@ -59,7 +59,7 @@ def meets_constraint(con, ty):
 
 
 
-class TypeConstraints(BaseTypeConstraints):
+class TypeConstraints(object):
   logger = logger.getChild('TypeConstraints')
   def __init__(self, maxwidth=64):
     self.sets = disjoint.DisjointSubsets()
@@ -78,7 +78,7 @@ class TypeConstraints(BaseTypeConstraints):
     assert isinstance(term, Value)
     self.logger.debug('adding term %s', term)
     self.sets.add_key(term)
-    term.accept(self)
+    term.type_constraints(self)
 
   def _merge(self, t1, t2):
     self.logger.debug('unifying %s and %s', t1, t2)

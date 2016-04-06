@@ -39,7 +39,7 @@ class Transform(pretty.PrettyRepr):
 
     t.eq_types(self.src, self.tgt)
     if self.pre:
-      self.pre.accept(t)
+      self.pre.type_constraints(t)
 
     reps = set(t.sets.reps())
     for r in src_reps:
