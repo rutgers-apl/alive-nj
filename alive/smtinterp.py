@@ -304,13 +304,19 @@ class SMTTranslator(Visitor):
     v = self.eval(term.arg)
     src = self.type(term.arg).width
     tgt = self.type(term).width
-    
-    if tgt == src:
-      return v
-    if tgt > src:
-      return z3.ZeroExt(tgt - src, v)
-    
-    return z3.Extract(tgt-1, 0, v)
+
+    return zext_or_trunc(v, src, tgt)
+
+  # FIXME: obtain ptr width from model/somewhere
+  def InttoptrInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg).width
+    return zext_or_trunc(v, src, 64)
+
+  def PtrtointInst(self, term):
+    v   = self.eval(term.arg)
+    tgt = self.type(term)
+    return zext_or_trunc(v, 64, tgt)
 
   def FPExtInst(self, term):
     v = self.eval(term.arg)

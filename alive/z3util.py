@@ -3,7 +3,8 @@ Extra functions for dealing with Z3 BitVecs.
 '''
 
 __all__ = ('mk_and', 'mk_or', 'mk_not', 'mk_forall', 'bool_to_BitVec',
-           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits', 'fpUEQ')
+           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits', 'fpUEQ',
+           'zext_or_trunc')
 
 import z3
 
@@ -53,6 +54,13 @@ def bv_log2(bitwidth, v):
     return z3.If(z3.Extract(h,mid+1,v) != 0, rec(h, mid+1), rec(mid, l))
   return rec(v.size()-1, 0)
 
+def zext_or_trunc(v, src, tgt):
+  if tgt == src:
+    return v
+  if tgt > src:
+    return z3.ZeroExt(tgt - src, v)
+
+  return z3.Extract(tgt-1, 0, v)
 
 def ctlz(output_width, v):
   size = v.size()

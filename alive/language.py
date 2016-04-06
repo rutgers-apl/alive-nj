@@ -261,6 +261,24 @@ class BitcastInst(ConversionInst):
     tcs.specific(self.arg, self.src_ty)
     tcs.width_equal(self.arg, self)
 
+class InttoptrInst(ConversionInst):
+  code = 'inttoptr'
+
+  def type_constraints(self, tcs):
+    tcs.integer(self.arg)
+    tcs.pointer(self)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.specific(self, self.ty)
+
+class PtrtointInst(ConversionInst):
+  code = 'ptrtoint'
+
+  def type_constraints(self, tcs):
+    tcs.pointer(self.arg)
+    tcs.integer(self)
+    tcs.specific(self.arg, self.src_ty)
+    tcs.specific(self, self.ty)
+
 class SExtInst(ConversionInst):
   code = 'sext'
 
