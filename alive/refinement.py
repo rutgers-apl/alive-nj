@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 UB, POISON, UNEQUAL = range(3)
 
 def check(opt, type_model, translator=config.translator):
-  logger.debug('Checking refinement of %r', opt.name)
+  logger.info('Checking refinement of %r', opt.name)
 
   translator = smtinterp.SMTTranslator.registry[translator]
   smt = translator(type_model)
@@ -64,7 +64,7 @@ header = '''(set-info :source |
 def check_expr(stage, expr, opt, err):
   s = z3.Solver()
   s.add(expr)
-  logger.debug('%s check\n%s', _stage_name[stage], s)
+  logger.info('%s check\n%s', _stage_name[stage], s)
 
   time0 = time.time()
   res = s.check()
@@ -73,7 +73,7 @@ def check_expr(stage, expr, opt, err):
   solve_time = time1 - time0
 
   if logger.isEnabledFor(logging.DEBUG):
-    logger.debug('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
+    logger.info('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
       s.statistics())
 
   if config.bench_dir and solve_time >= config.bench_threshold:
@@ -88,7 +88,7 @@ def check_expr(stage, expr, opt, err):
 
   if res == z3.sat:
     m = s.model()
-    logger.debug('counterexample: %s', m)
+    logger.info('counterexample: %s', m)
 
     raise err(stage, m)
 

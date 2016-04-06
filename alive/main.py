@@ -36,6 +36,7 @@ class StatusReporter(object):
       self.stdstatus = False
 
   def begin_opt(self, opt):
+    logging.info('Checking opt %s', opt.name)
     self.opt = opt
     self.checks = 0
 
@@ -55,6 +56,7 @@ class StatusReporter(object):
     if self.checks == 0:
       raise typing.Error('Unsatisfiable type constraints')
 
+    logging.info('Passed %s checks', self.checks)
     self.tested += 1
     if not self.quiet:
       self.clear()
@@ -62,6 +64,7 @@ class StatusReporter(object):
       print 'Optimization is correct'
 
   def fail_opt(self, error):
+    logging.info('Verification failed: %s', error)
     self.tested += 1
     self.failed += 1
     self.failures.append(self.opt.name)

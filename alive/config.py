@@ -28,7 +28,7 @@ logs = {
   
   'formatters': {
     'default': {
-      'format': '%(asctime)s - %(levelname)-8s - %(name)s - %(message)s',
+      'format': '%(asctime)s %(levelname)-8s %(name)s - %(message)s',
     },
     
     'brief': {
