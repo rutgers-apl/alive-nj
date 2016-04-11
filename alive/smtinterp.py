@@ -753,6 +753,44 @@ class FastMathUndef(SMTTranslator):
 
     return z
 
+class A1B1(SMTTranslator):
+  def _float_binary_operator(self, term, op):
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    conds = []
+    z = op(x,y)
+    if 'nnan' in self.attrs[term]:
+      conds += [z3.Implies(self.attrs[term]['nnan'],
+        z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y)))))]
+    elif 'nnan' in term.flags:
+      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y)))]
+
+    if 'ninf' in self.attrs[term]:
+      conds += [z3.Implies(self.attrs[term]['ninf'],
+        z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y)))))]
+    elif 'ninf' in term.flags:
+      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y)))]
+
+    if 'nsz' in self.attrs[term]:
+      z = z3.If(self.attrs[term]['nsz'], op(x+0,y+0)+0, op(x,y))
+
+    elif 'nsz' in term.flags:
+      z = op(x+0, y+0)+0
+
+    if conds:
+      q = self.fresh_var(self.type(term))
+      self.add_qvar(q)
+
+      return z3.If(mk_and(conds), z, q)
+
+    return z
+
+
 class FPImpreciseUndef(SMTTranslator):
   def SItoFPInst(self, term):
     v = self.eval(term.arg)
