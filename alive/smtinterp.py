@@ -78,7 +78,10 @@ def _ty_sort(ty):
     PtrType: z3.BitVecSort(64),
     HalfType: z3.FloatHalf(),
     SingleType: z3.Float32(),
-    DoubleType: z3.Float64()}[type(ty)]
+    DoubleType: z3.Float64(),
+    FP128Type: z3.Float128(),
+    X86FP80Type: z3.FPSort(15, 64),
+    }[type(ty)]
     # NOTE: this assumes the global z3 context never changes
 
 class MetaTranslator(MetaVisitor):
@@ -283,12 +286,24 @@ class SMTTranslator(Visitor):
     if src == tgt:  # no-op
       return v
 
-    if isinstance(src, (IntType,PtrType)) and \
-        isinstance(tgt, (IntType,PtrType)):
-      return v  # also a no-op
+    if isinstance(src, (IntType,PtrType)):
+      if  isinstance(tgt, (IntType,PtrType)):
+        return v  # also a no-op
 
-    if isinstance(src, (IntType,PtrType)) and isinstance(tgt, FloatType):
-      return z3.fpToFP(v, _ty_sort(tgt))
+      if isinstance(tgt, X86FP80Type):
+        # FIXME: ensure bit 64 is 1
+        return z3.fpFP(z3.Extract(79,79,v),
+          z3.Extract(78,64,v),
+          z3.Extract(62,0,v))
+
+      if isinstance(tgt, FloatType):
+        return z3.fpToFP(v, _ty_sort(tgt))
+
+    if isinstance(src, X86FP80Type) and isinstance(tgt, (IntType,PtrType)):
+      w = z3.fpToIEEEBV(v)
+      return z3.Concat(z3.Extract(78,63,w),
+        z3.BitVecVal(1,1),
+        z3.Extract(62,0,w))
 
     if isinstance(src, FloatType) and isinstance(tgt, (IntType,PtrType)):
       return z3.fpToIEEEBV(v)

@@ -27,7 +27,7 @@ Alive-NJ reads from standard input if no arguments are given.
 Alive-NJ adds these features:
 
 * Support for floating-point
-    * `half`, `float`, and `double` types
+    * `half`, `float`, `double`, `fp128`, and `x86_fp80` types
     * Instructions: `fadd`, `fsub`, `fmul`, `fdiv`, `frem`, `fcmp`,
       `fptosi`, `fptoui`, `sitofp`, `uitofp`, `fpext`, `fptrunc`
     * Symbolic constants, integer literals, and expressions using `+`, `-`,

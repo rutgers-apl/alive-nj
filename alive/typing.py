@@ -209,6 +209,8 @@ class TypeConstraints(object):
 
     if isinstance(ty, IntType):
       return ty.width
+    if isinstance(ty, X86FP80Type):
+      return 80
     if isinstance(ty, FloatType):
       return ty.exp + ty.frac
       # true for all current floats: the sign bit and the implicit fraction

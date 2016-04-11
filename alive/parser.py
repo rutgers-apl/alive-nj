@@ -42,6 +42,8 @@ class FloatTypeAst(TypeAst):
     'half': L.HalfType(),
     'float': L.SingleType(),
     'double': L.DoubleType(),
+    'fp128': L.FP128Type(),
+    'x86_fp80': L.X86FP80Type(),
   }
 
   def eval(self, ids, phase):
@@ -398,7 +400,7 @@ class SelectAst(InstAst):
 posnum = Word(nums).setParseAction(lambda s,l,t: int(t[0]))
 
 ty = ('i' + posnum).setParseAction(IntTypeAst) \
-  | oneOf('half float double').setParseAction(FloatTypeAst)
+  | oneOf('half float double fp128 x86_fp80').setParseAction(FloatTypeAst)
 ty.setName('type')
 
 opt_ty = Optional(ty).setParseAction(OptionalTypeAst)

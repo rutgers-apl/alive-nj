@@ -102,6 +102,21 @@ class DoubleType(FloatType):
 
   def __str__(self): return 'double'
 
+class FP128Type(FloatType):
+  __slots__ = ()
+  exp = 15
+  frac = 113
+
+  def __str__(self): return 'fp128'
+
+class X86FP80Type(FloatType):
+  __slots__ = ()
+  exp = 15
+  frac = 64
+  # NOTE: adds up to 79 because there is no implicit bit
+
+  def __str__(self): return 'x86_fp80'
+
 
 # DAG Nodes
 # ---------

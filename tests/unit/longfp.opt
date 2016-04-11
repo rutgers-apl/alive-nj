@@ -1,0 +1,15 @@
+Name: Quad
+Pre: isSignBit(C)
+%0 = bitcast %x to i128
+%1 = xor %0, C
+%r = bitcast %1 to fp128
+=>
+%r = fsub -0.0, %x
+
+Name: X86_fp80
+Pre: isSignBit(C)
+%0 = bitcast %x to i80
+%1 = xor %0, C
+%r = bitcast %1 to x86_fp80
+=>
+%r = fsub -0.0, %x
