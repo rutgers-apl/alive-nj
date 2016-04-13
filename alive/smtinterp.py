@@ -291,7 +291,7 @@ class SMTTranslator(Visitor):
         return v  # also a no-op
 
       if isinstance(tgt, X86FP80Type):
-        # FIXME: ensure bit 64 is 1
+        # FIXME: ensure bit 64 is correct
         return z3.fpFP(z3.Extract(79,79,v),
           z3.Extract(78,64,v),
           z3.Extract(62,0,v))
@@ -301,9 +301,11 @@ class SMTTranslator(Visitor):
 
     if isinstance(src, X86FP80Type) and isinstance(tgt, (IntType,PtrType)):
       w = z3.fpToIEEEBV(v)
-      return z3.Concat(z3.Extract(78,63,w),
-        z3.BitVecVal(1,1),
-        z3.Extract(62,0,w))
+      i = z3.If(z3.Or(z3.fpIsZero(v), z3.fpIsSubnormal(v)),
+        z3.BitVecVal(0,1),
+        z3.BitVecVal(1,1))
+
+      return z3.Concat(z3.Extract(78,63,w), ib, z3.Extract(62,0,w))
 
     if isinstance(src, FloatType) and isinstance(tgt, (IntType,PtrType)):
       return z3.fpToIEEEBV(v)
