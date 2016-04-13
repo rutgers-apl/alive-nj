@@ -8,6 +8,8 @@ import z3, operator, logging
 import types
 import collections
 
+if not hasattr(z3, 'fpIsInfinite'):
+  z3.fpIsInfinite = z3.fpIsInf
 
 logger = logging.getLogger(__name__)
 
