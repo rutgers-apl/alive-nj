@@ -18,6 +18,9 @@ bench_dir = None
 # output benchmark if solve time exceeds this threshold (in seconds)
 bench_threshold = 0.0
 
+# timeout for Z3, in ms. None for no timeout
+timeout = 5*60*1000
+
 # which class to use for translation to SMT (by lowercased name)
 translator = 'smttranslator'
 

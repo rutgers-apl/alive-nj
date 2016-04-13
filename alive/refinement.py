@@ -63,6 +63,8 @@ header = '''(set-info :source |
 
 def check_expr(stage, expr, opt, err):
   s = z3.Solver()
+  if config.timeout is not None:
+    s.set('timeout', config.timeout)
   s.add(expr)
   logger.info('%s check\n%s', _stage_name[stage], s)
 
