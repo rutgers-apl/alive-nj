@@ -384,7 +384,7 @@ class FPExtInst(ConversionInst):
 
   def type_constraints(self, tcs):
     tcs.float(self)
-    tcs.integer(self.arg)
+    tcs.float(self.arg)
     tcs.specific(self, self.ty)
     tcs.specific(self.arg, self.src_ty)
     tcs.width_order(self.arg, self)
@@ -747,7 +747,7 @@ class FPExtCnxp(FunCnxp):
   def type_constraints(self, tcs):
     tcs.float(self)
     tcs.float(self._args[0])
-    tcs.width_order(self, self._args[0])
+    tcs.width_order(self._args[0], self)
 
 class FPTruncCnxp(FunCnxp):
   sig  = (Constant,)
@@ -756,7 +756,7 @@ class FPTruncCnxp(FunCnxp):
   def type_constraints(self, tcs):
     tcs.float(self)
     tcs.float(self._args[0])
-    tcs.width_order(self._args[0], self)
+    tcs.width_order(self, self._args[0])
 
 class FPtoSICnxp(FunCnxp):
   sig  = (Constant,)
