@@ -1,0 +1,96 @@
+; LLVM 3.8.0 InstCombineMulDivRem.cpp
+
+; visitFMul
+
+; Name: muldivrem:553
+; ; FoldOpIntoSelect
+; Pre: hasOneUse(%x)
+; ; %a != cmp %tv, %C1
+; %x = select %a, %b, C1
+; %r = fmul %x, C2
+; =>
+; %b. = fmul %b, C2
+; %r = select %a, %b., C1*C2
+
+; Name: muldivrem:557
+; FoldOpIntoPhi
+
+
+Name: muldivrem:582-1
+%r = fmul nnan ninf %x, -1
+=>
+%r = fsub nnan ninf -0.0, %x
+
+Name: muldivrem:582-2
+%r = fmul nnan %x, -1
+=>
+%r = fsub nnan -0.0, %x
+
+Name: muldivrem:582-3
+%r = fmul ninf %x, -1
+=>
+%r = fsub ninf -0.0, %x
+
+Name: muldivrem:582-4
+%r = fmul nsz %x, -1
+=>
+%r = fsub nsz -0.0, %x
+
+; variants with nsz
+
+Name: muldivrem:582
+%r = fmul %x, -1
+=>
+%r = fsub -0.0, %x
+
+
+Name: muldivrem:661-1 ; slow
+%x = fsub -0.0, %a
+%y = fsub -0.0, %b
+%z = fmul half %x, %y
+=>
+%z = fmul %a, %b
+
+Name: muldivrem:661-2 ; slow? 
+; TODO: double-check dyn_castFNegVal
+Pre: C1 == 0 && C2 == 0
+%x = fsub C1, %a
+%y = fsub C2, %b
+%z = fmul nsz half %x, %y
+=>
+%z = fmul %a, %b
+
+
+Name: muldivrem:667
+Pre: hasOneUse(%x)
+%x = fsub -0.0, %a
+%z = fmul %x, %y  ; symmetric
+=>
+%w = fmul %a, %y
+%z = fsub -0.0, %w
+
+
+
+; visitFDiv
+
+; FIXME: FoldOpIntoSelect -- 1225
+; FIXME: FoldOpIntoSelect -- 1233
+
+; FIXME: CvtFDivConstToReciprocal -- 1266
+; Name: muldivrem:1266
+; Pre: fpIdentical((1/C) * C, C)
+; Pre: isPowerOf2(C) && ?
+; Pre: invertable(C)
+; %r = fdiv %x, C
+; =>
+; %r = fmul %x, 1/C
+
+
+; visitFRem
+
+; PR26943 (lifejacket)
+Name: muldivrem:1500
+%1 = select %A, 0, %Y ; symmetric
+%r = frem %X, %1
+=>
+%r = frem %X, %Y

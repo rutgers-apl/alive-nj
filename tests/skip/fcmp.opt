@@ -1,0 +1,248 @@
+; LLVM 3.8 InstCombineCompares.cpp
+
+
+; FoldFCmp_IntToFP_Cst
+Name: compares:3861-1
+Pre: !fpInteger(C)
+%x = uitofp %a
+%r = fcmp oeq %x, C
+=>
+%r = false
+
+Name: compares:3861-2
+Pre: !fpInteger(C)
+%x = uitofp %a
+%r = fcmp ueq %x, C
+=>
+%r = false
+
+Name: compares:3861-3
+Pre: !fpInteger(C)
+%x = uitofp %a
+%r = fcmp one %x, C
+=>
+%r = true
+
+Name: compares:3861-4
+Pre: !fpInteger(C)
+%x = uitofp %a
+%r = fcmp une %x, C
+=>
+%r = true
+
+Name: compares:3861-5
+Pre: !fpInteger(C)
+%x = sitofp %a
+%r = fcmp oeq %x, C
+=>
+%r = false
+
+Name: compares:3861-6
+Pre: !fpInteger(C)
+%x = sitofp %a
+%r = fcmp ueq %x, C
+=>
+%r = false
+
+Name: compares:3861-7
+Pre: !fpInteger(C)
+%x = sitofp %a
+%r = fcmp one %x, C
+=>
+%r = true
+
+Name: compares:3861-8
+Pre: !fpInteger(C)
+%x = sitofp %a
+%r = fcmp une %x, C
+=>
+%r = true
+
+
+; next section should also allow larger ints
+Name: compares:3936-1
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = sitofp %a
+%r = fcmp ord %x, C
+=>
+%r = true
+
+Name: compares:3936-2
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = uitofp %a
+%r = fcmp ord %x, C
+=>
+%r = true
+
+Name: compares:3938-1
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = sitofp %a
+%r = fcmp uno %x, C
+=>
+%r = false
+
+Name: compares:3938-2
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = uitofp %a
+%r = fcmp uno %x, C
+=>
+%r = false
+
+; TODO: still more
+
+; visitFCmpInst
+
+; skip operand swap
+
+Name: compares:4102-1
+%r = fcmp uno %x, %x
+=>
+%r = fcmp uno %x, 0
+
+Name: compares:4102-2
+%r = fcmp ult %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+Name: compares:4102-3
+%r = fcmp ugt %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+Name: compares:4102-4
+%r = fcmp une %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+
+Name: compares:4111-1
+%r = fcmp ord %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-2
+%r = fcmp oeq %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-3
+%r = fcmp oge %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-4
+%r = fcmp ole %x, %x
+=>
+%r = fcmp ord %x, 0
+
+
+; FIXME: skip prevent optimizing min/max -- 4125
+
+Name: compares:4135
+Pre: fpext(C1) == C 
+; LLVM has isNormal(C). why?
+%x = fpext %a
+%r = fcmp %x, C
+=>
+C1 = fptrunc(C)
+%r = fcmp %a, C1
+
+
+; FIXME: combine these 16 into one opt using pred_swap
+Name: compares:4188-1
+%x = fsub -0.0, %a
+%r = fcmp false %x, C
+=>
+%r = fcmp false %a, -C
+
+Name: compares:4188-2
+%x = fsub -0.0, %a
+%r = fcmp oeq %x, C
+=>
+%r = fcmp oeq %a, -C
+
+Name: compares:4188-3
+%x = fsub -0.0, %a
+%r = fcmp ogt %x, C
+=>
+%r = fcmp olt %a, -C
+
+Name: compares:4188-4
+%x = fsub -0.0, %a
+%r = fcmp oge %x, C
+=>
+%r = fcmp ole %a, -C
+
+Name: compares:4188-5
+%x = fsub -0.0, %a
+%r = fcmp olt %x, C
+=>
+%r = fcmp ogt %a, -C
+
+Name: compares:4188-6
+%x = fsub -0.0, %a
+%r = fcmp ole %x, C
+=>
+%r = fcmp oge %a, -C
+
+Name: compares:4188-7
+%x = fsub -0.0, %a
+%r = fcmp one %x, C
+=>
+%r = fcmp one %a, -C
+
+Name: compares:4188-8
+%x = fsub -0.0, %a
+%r = fcmp ord %x, C
+=>
+%r = fcmp ord %a, -C
+
+Name: compares:4188-9
+%x = fsub -0.0, %a
+%r = fcmp ueq %x, C
+=>
+%r = fcmp ueq %a, -C
+
+Name: compares:4188-10
+%x = fsub -0.0, %a
+%r = fcmp ugt %x, C
+=>
+%r = fcmp ult %a, -C
+
+Name: compares:4188-11
+%x = fsub -0.0, %a
+%r = fcmp uge %x, C
+=>
+%r = fcmp ule %a, -C
+
+Name: compares:4188-12
+%x = fsub -0.0, %a
+%r = fcmp ult %x, C
+=>
+%r = fcmp ugt %a, -C
+
+Name: compares:4188-13
+%x = fsub -0.0, %a
+%r = fcmp ule %x, C
+=>
+%r = fcmp uge %a, -C
+
+Name: compares:4188-14
+%x = fsub -0.0, %a
+%r = fcmp une %x, C
+=>
+%r = fcmp une %a, -C
+
+Name: compares:4188-15
+%x = fsub -0.0, %a
+%r = fcmp uno %x, C
+=>
+%r = fcmp uno %a, -C
+
+Name: compares:4188-16
+%x = fsub -0.0, %a
+%r = fcmp false %x, C
+=>
+%r = fcmp false %a, -C
+
+
