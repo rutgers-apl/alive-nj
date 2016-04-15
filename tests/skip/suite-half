@@ -1,0 +1,729 @@
+Name: addsub:1338
+; slow
+%na = fsub half -0.0, %a
+%r  = fadd %na, %b
+  =>
+%r  = fsub %b, %a
+
+; they claim to also do -A + -B => -(A+B), but I don't see it
+
+; NOTE: why?
+Name: addsub:1338
+; slow
+%r = fadd half C, %b
+=>
+%r = fsub %b, -C
+
+
+; NOTE: why?
+Name: addsub:1345
+%r = fadd half %a, C
+=>
+%r = fsub %a, -C
+
+
+Name: addsub:1354
+Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
+%x = sitofp i64 %a to half
+%r = fadd %x, C
+=>
+C0 = fptosi(C)
+%y = add nsw %a, C0
+%r = sitofp %y
+
+
+; Pre: C1 == 0.0 && C2 == 0.0 && \
+;   (hasNSZ(%r) || fpsame(C1, -0.0) && fpsame(C2, -0.0))
+
+Name: addsub:1392-nsz
+Pre: C1 == 0.0 && C2 == 0.0
+%0 = select %C, C1, %B
+%1 = select %C, %A, C2
+%r = fadd nsz half %0, %1
+=>
+%r = select %C, %A, %B
+
+Name: addsub:1392
+%0 = select %C, -0.0, %B
+%1 = select %C, %A, -0.0
+%r = fadd half %0, %1
+=>
+%r = select %C, %A, %B
+; LLVM 3.8 InstCombineCompares.cpp
+
+
+; FoldFCmp_IntToFP_Cst
+Name: compares:3861-1
+Pre: !fpInteger(C)
+%x = uitofp i64 %a to half
+%r = fcmp oeq %x, C
+=>
+%r = false
+
+Name: compares:3861-2
+Pre: !fpInteger(C)
+%x = uitofp i64 %a to half
+%r = fcmp ueq %x, C
+=>
+%r = false
+
+Name: compares:3861-3
+Pre: !fpInteger(C)
+%x = uitofp i64 %a to half
+%r = fcmp one %x, C
+=>
+%r = true
+
+Name: compares:3861-4
+Pre: !fpInteger(C)
+%x = uitofp i64 %a to half
+%r = fcmp une %x, C
+=>
+%r = true
+
+Name: compares:3861-5
+Pre: !fpInteger(C)
+%x = sitofp i64 %a to half
+%r = fcmp oeq %x, C
+=>
+%r = false
+
+Name: compares:3861-6
+Pre: !fpInteger(C)
+%x = sitofp i64 %a to half
+%r = fcmp ueq %x, C
+=>
+%r = false
+
+Name: compares:3861-7
+Pre: !fpInteger(C)
+%x = sitofp i64 %a to half
+%r = fcmp one %x, C
+=>
+%r = true
+
+Name: compares:3861-8
+Pre: !fpInteger(C)
+%x = sitofp i64 %a to half
+%r = fcmp une %x, C
+=>
+%r = true
+
+
+; next section should also allow larger ints
+Name: compares:3936-1
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = sitofp i64 %a to half
+%r = fcmp ord %x, C
+=>
+%r = true
+
+Name: compares:3936-2
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = uitofp i64 %a to half
+%r = fcmp ord %x, C
+=>
+%r = true
+
+Name: compares:3938-1
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = sitofp i64 %a to half
+%r = fcmp uno %x, C
+=>
+%r = false
+
+Name: compares:3938-2
+Pre: !fpIdentical(C, nan) && width(%a) <= fpMantissaWidth(%x)
+%x = uitofp i64 %a to half
+%r = fcmp uno %x, C
+=>
+%r = false
+
+; TODO: still more
+
+; visitFCmpInst
+
+; skip operand swap
+
+Name: compares:4102-1
+%r = fcmp uno half %x, %x
+=>
+%r = fcmp uno %x, 0
+
+Name: compares:4102-2
+%r = fcmp ult half %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+Name: compares:4102-3
+%r = fcmp ugt half %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+Name: compares:4102-4
+%r = fcmp une half %x, %x
+=>
+%r = fcmp uno %x, 0.0
+
+
+Name: compares:4111-1
+%r = fcmp ord half %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-2
+%r = fcmp oeq half %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-3
+%r = fcmp oge half %x, %x
+=>
+%r = fcmp ord %x, 0
+
+Name: compares:4111-4
+%r = fcmp ole half %x, %x
+=>
+%r = fcmp ord %x, 0
+
+
+; FIXME: skip prevent optimizing min/max -- 4125
+
+; Name: compares:4135
+; Pre: fpext(C1) == C 
+; ; LLVM has isNormal(C). why?
+; %x = fpext %a
+; %r = fcmp %x, C
+; =>
+; C1 = fptrunc(C)
+; %r = fcmp %a, C1
+
+
+; FIXME: combine these 16 into one opt using pred_swap
+Name: compares:4188-1
+%x = fsub half -0.0, %a
+%r = fcmp false %x, C
+=>
+%r = fcmp false %a, -C
+
+Name: compares:4188-2
+%x = fsub half -0.0, %a
+%r = fcmp oeq %x, C
+=>
+%r = fcmp oeq %a, -C
+
+Name: compares:4188-3
+%x = fsub half -0.0, %a
+%r = fcmp ogt %x, C
+=>
+%r = fcmp olt %a, -C
+
+Name: compares:4188-4
+%x = fsub half -0.0, %a
+%r = fcmp oge %x, C
+=>
+%r = fcmp ole %a, -C
+
+Name: compares:4188-5
+%x = fsub half -0.0, %a
+%r = fcmp olt %x, C
+=>
+%r = fcmp ogt %a, -C
+
+Name: compares:4188-6
+%x = fsub half -0.0, %a
+%r = fcmp ole %x, C
+=>
+%r = fcmp oge %a, -C
+
+Name: compares:4188-7
+%x = fsub half -0.0, %a
+%r = fcmp one %x, C
+=>
+%r = fcmp one %a, -C
+
+Name: compares:4188-8
+%x = fsub half -0.0, %a
+%r = fcmp ord %x, C
+=>
+%r = fcmp ord %a, -C
+
+Name: compares:4188-9
+%x = fsub half -0.0, %a
+%r = fcmp ueq %x, C
+=>
+%r = fcmp ueq %a, -C
+
+Name: compares:4188-10
+%x = fsub half -0.0, %a
+%r = fcmp ugt %x, C
+=>
+%r = fcmp ult %a, -C
+
+Name: compares:4188-11
+%x = fsub half -0.0, %a
+%r = fcmp uge %x, C
+=>
+%r = fcmp ule %a, -C
+
+Name: compares:4188-12
+%x = fsub half -0.0, %a
+%r = fcmp ult %x, C
+=>
+%r = fcmp ugt %a, -C
+
+Name: compares:4188-13
+%x = fsub half -0.0, %a
+%r = fcmp ule %x, C
+=>
+%r = fcmp uge %a, -C
+
+Name: compares:4188-14
+%x = fsub half -0.0, %a
+%r = fcmp une %x, C
+=>
+%r = fcmp une %a, -C
+
+Name: compares:4188-15
+%x = fsub half -0.0, %a
+%r = fcmp uno %x, C
+=>
+%r = fcmp uno %a, -C
+
+Name: compares:4188-16
+%x = fsub half -0.0, %a
+%r = fcmp false %x, C
+=>
+%r = fcmp false %a, -C
+
+
+; LLVM 3.8.0 InstCombineMulDivRem.cpp
+
+; visitFMul
+
+; Name: muldivrem:553
+; ; FoldOpIntoSelect
+; Pre: hasOneUse(%x)
+; ; %a != cmp %tv, %C1
+; %x = select %a, %b, C1
+; %r = fmul %x, C2
+; =>
+; %b. = fmul %b, C2
+; %r = select %a, %b., C1*C2
+
+; Name: muldivrem:557
+; FoldOpIntoPhi
+
+Name: muldivrem:582-1
+%r = fmul nnan ninf nsz half %x, -1
+=>
+%r = fsub nnan ninf -0.0, %x
+
+Name: muldivrem:582-2
+%r = fmul nnan nsz half %x, -1
+=>
+%r = fsub nnan -0.0, %x
+
+Name: muldivrem:582-3
+%r = fmul ninf nsz half %x, -1
+=>
+%r = fsub ninf -0.0, %x
+
+Name: muldivrem:582-4
+%r = fmul nsz half %x, -1
+=>
+%r = fsub nsz -0.0, %x
+
+Name: muldivrem:582-5
+%r = fmul nnan ninf half %x, -1
+=>
+%r = fsub nnan ninf -0.0, %x
+
+Name: muldivrem:582-6
+%r = fmul nnan half %x, -1
+=>
+%r = fsub nnan -0.0, %x
+
+Name: muldivrem:582-7
+%r = fmul ninf half %x, -1
+=>
+%r = fsub ninf -0.0, %x
+
+; variants with nsz
+
+Name: muldivrem:582-8
+%r = fmul half %x, -1
+=>
+%r = fsub -0.0, %x
+
+
+Name: muldivrem:661-1 ; slow
+%x = fsub -0.0, %a
+%y = fsub -0.0, %b
+%z = fmul half %x, %y
+=>
+%z = fmul %a, %b
+
+Name: muldivrem:661-2 ; slow? 
+; TODO: double-check dyn_castFNegVal
+Pre: C1 == 0 && C2 == 0
+%x = fsub C1, %a
+%y = fsub C2, %b
+%z = fmul nsz half %x, %y
+=>
+%z = fmul %a, %b
+
+
+Name: muldivrem:667
+Pre: hasOneUse(%x)
+%x = fsub half -0.0, %a
+%z = fmul %x, %y  ; symmetric
+=>
+%w = fmul %a, %y
+%z = fsub -0.0, %w
+
+
+
+; visitFDiv
+
+; FIXME: FoldOpIntoSelect -- 1225
+; FIXME: FoldOpIntoSelect -- 1233
+
+; FIXME: CvtFDivConstToReciprocal -- 1266
+; Name: muldivrem:1266
+; Pre: fpIdentical((1/C) * C, C)
+; Pre: isPowerOf2(C) && ?
+; Pre: invertable(C)
+; %r = fdiv %x, C
+; =>
+; %r = fmul %x, 1/C
+
+
+; visitFRem
+
+; PR26943 (lifejacket)
+Name: muldivrem:1500
+%1 = select %A, 0, %Y ; symmetric
+%r = frem half %X, %1
+=>
+%r = frem %X, %Y
+Name: simplify:802
+%r = fadd %x, -0.0
+=>
+%r = %x
+
+Name: simplify:806
+Pre: hasNSZ(%r) || CannotBeNegativeZero(%x)
+%r = fadd half %x, 0
+=>
+%r = %x
+
+; Name: simplfy:806-1
+; %r = fadd nsz %x, 0.0
+; =>
+; %r = %x
+; 
+; Name: simplify:806-2
+; Pre: CannotBeNegativeZero(%x)
+; %r = fadd %x, 0.0
+; =>
+; %r = %x
+
+; Name: simplify:813
+; Pre: C == 0.0 && (hasNoInf(%0) || hasNoInf(%r)) && \
+;   (hasNoNaN(%0) || hasNoNaN(%r))
+; %0 = fsub C, %x
+; %r = fadd %0, %x
+; =>
+; %r = 0.0
+
+Name: simplify:813-1
+Pre: C == 0.0
+%0 = fsub half C, %x
+%r = fadd nnan ninf %0, %x
+=>
+%r = 0.0
+
+Name: simplify:813-2
+Pre: C == 0.0
+%0 = fsub nnan ninf C, %x
+%r = fadd half %0, %x
+=>
+%r = 0.0
+
+Name: simplify:813-3
+Pre: C == 0.0
+%0 = fsub nnan C, %x
+%r = fadd ninf half %0, %x
+=>
+%r = 0.0
+
+Name: simplify:813-4
+Pre: C == 0.0
+%0 = fsub ninf C, %x
+%r = fadd nnan half %0, %x
+=>
+%r = 0.0
+
+Name: simplify:841
+%r = fsub half %x, 0.0
+=>
+%r = %x
+
+Name: simplify:845
+Pre: CannotBeNegativeZero(%x) || hasNSZ(%r)
+%r = fsub half %x, -0.0
+=>
+%r = %x
+
+; Name: simplify:845-1
+; %r = fsub nsz %x, -0.0
+; =>
+; %r = %x
+; 
+; Name: simplify:845-2
+; Pre: CannotBeNegativeZero(%x)
+; %r = fsub %x, -0.0
+; =>
+; %r = %x
+
+Name: simplify:851-1  ; Bug?
+Pre: C == 0.0
+%1 = fsub half -0.0, %x
+%r = fsub C, %1
+=>
+%r = %x
+
+Name: simplify:851-2
+Pre: C == 0.0 && C1 == 0.0
+%1 = fsub half C1, %x
+%r = fsub nsz C, %1
+=>
+%r = %x
+
+Name: simplify:859
+%r = fsub nnan half %x, %x
+=>
+%r = 0.0
+
+Name: simplify:882
+%r = fmul half %x, 1
+=>
+%r = %x
+
+Name: simplify:886
+Pre: C == 0.0
+%r = fmul nnan nsz half %x, C
+=>
+%r = C
+
+Name: simplify:1117  ; seems wrong
+%r = fdiv half undef, %x
+=>
+%r = undef
+
+Name: simplify:1121  ; seems wrong
+%r = fdiv half %x, undef
+=>
+%r = undef
+
+; n.b., +0 / 1 = +0, +0 / -1 = -0
+Name: simplify:1127
+Pre: C == 0
+%r = fdiv nnan nsz half C, %x
+=>
+%r = C
+
+Name: simplify:1132
+%r = fdiv nnan half %a, %a
+=>
+%r = 1
+
+Name: simplify:1138-1
+Pre: C == 0
+%na = fsub half C, %a
+%r  = fdiv nnan %na, %a
+=>
+%r  = -1
+
+Name: simplify:1138-2
+Pre: C == 0
+%na = fsub half C, %a
+%r  = fdiv nnan %a, %na
+=>
+%r  = -1
+
+; ; seems wrong: surely the source can't produce a value
+; ; larger than %x
+Name: simplify:1257  ; seems wrong
+%r = frem half undef, %x
+=>
+%r = undef
+
+; again, the output is limited by %x
+Name: simplify:1261  ; seems wrong
+%r = frem half %x, undef
+=>
+%r = undef
+
+
+; @@ LLVM has nsz here, which seems unnecessary
+Name: simplify:1267
+Pre: C == 0
+%r = frem nnan half C, %x
+=>
+%r = C
+
+
+Name: simplify:3065
+%r = fcmp false half %a, %b
+=>
+%r = false
+
+Name: simplify:3067
+%r = fcmp true half %a, %b
+=>
+%r = true
+
+Name: simplify:3073
+%r = fcmp nnan uno half %a, %b
+=>
+%r = false
+
+Name: simplify:3074
+%r = fcmp nnan ord half %a, %b
+=>
+%r = true
+
+
+Name: simplify:3080-1
+; TODO: symmetric and applies to all ordered predicates
+; n.b., only correct if shadowed by simplify:3074
+%r = fcmp ord half %a, undef
+=>
+%r = false
+
+Name: simplify:3080-2
+; TODO: symmetric and applies to all unordered predicates
+; n.b., only correct if shadowed by simplify:3073
+%r = fcmp uno half %a, undef
+=>
+%r = true
+
+; omitted: true handled by simplify:3067
+Name: simplify:3088-1
+%r = fcmp ueq half %a, %a
+=>
+%r = true
+
+Name: simplify:3088-2
+%r = fcmp uge half %a, %a
+=>
+%r = true
+
+Name: simplify:3088-3
+%r = fcmp ule half %a, %a
+=>
+%r = true
+
+; omitted: false handled by simplify:3065
+Name: simplify:3090-1
+%r = fcmp one half %a, %a
+=>
+%r = false
+
+Name: simplify:3090-2
+%r = fcmp ogt half %a, %a
+=>
+%r = false
+
+Name: simplify:3090-3
+%r = fcmp olt half %a, %a
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp oeq half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp oge half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ogt half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ole half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp olt half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp one half %a, nan
+=>
+%r = false
+
+Name: simplify:3098
+%r = fcmp ord half %a, nan
+=>
+%r = false
+
+
+Name: simplify:3100
+%r = fcmp ueq half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp uge half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ugt half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ule half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp ult half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp une half %a, nan
+=>
+%r = true
+
+Name: simplify:3100
+%r = fcmp uno half %a, nan
+=>
+%r = true
+
+Name: ItoFPtoI
+Pre: fpMantissaWidth(%y) >= min(width(%x), width(%z))
+%y = uitofp i64 %x to half
+%z = fptoui %y to i8
+=>
+%z = ZExtOrTrunc %x
+
+Name: bitcast
+Pre: isSignBit(C)
+%0 = bitcast half %x to i16
+%1 = xor %0, C
+%r = bitcast %1
+=>
+%r = fsub -0.0, %x
