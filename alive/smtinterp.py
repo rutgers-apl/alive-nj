@@ -443,12 +443,23 @@ class SMTTranslator(Visitor):
     'true': lambda x,y: z3.BoolVal(True),
   }
 
-  # TODO: fcmp flags
   def FcmpInst(self, term):
     x = self.eval(term.x)
     y = self.eval(term.y)
 
-    cmp = self._fcmp_ops[term.pred](x,y)
+    if term.pred == '':
+      var = z3.BitVec('fcmp_' + term.name, 4)
+      ops = self._fcmp_ops.itervalues()
+      # since _fcmp_ops should never change, this should be stable
+
+      cmp = ops.next()(x,y)
+      i = 1
+      for op in ops:
+        cmp = z3.If(var == i, op(x,y), cmp)
+        i += 1
+
+    else:
+      cmp = self._fcmp_ops[term.pred](x,y)
 
     if 'nnan' in term.flags:
       self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)))
