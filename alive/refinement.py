@@ -74,7 +74,7 @@ def check_expr(stage, expr, opt, err):
   
   solve_time = time1 - time0
 
-  if logger.isEnabledFor(logging.DEBUG):
+  if logger.isEnabledFor(logging.INFO):
     logger.info('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
       s.statistics())
 
