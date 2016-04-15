@@ -420,8 +420,8 @@ ident.setName("Identifier")
 
 cexpr = Forward()
 
-
-arg = reg | cexpr
+special_arg = oneOf('true false null nan inf -inf').setParseAction(LitWordAst)
+arg = reg | special_arg | cexpr
 
 args = delimitedList(arg)
 
