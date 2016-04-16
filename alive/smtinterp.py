@@ -307,7 +307,7 @@ class SMTTranslator(Visitor):
         z3.BitVecVal(0,1),
         z3.BitVecVal(1,1))
 
-      return z3.Concat(z3.Extract(78,63,w), ib, z3.Extract(62,0,w))
+      return z3.Concat(z3.Extract(78,63,w), i, z3.Extract(62,0,w))
 
     if isinstance(src, FloatType) and isinstance(tgt, (IntType,PtrType)):
       return z3.fpToIEEEBV(v)
