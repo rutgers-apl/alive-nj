@@ -17,32 +17,44 @@
 
 
 Name: muldivrem:582-1
-%r = fmul nnan ninf %x, -1
+%r = fmul nnan ninf nsz half %x, -1
 =>
 %r = fsub nnan ninf -0.0, %x
 
 Name: muldivrem:582-2
-%r = fmul nnan %x, -1
+%r = fmul nnan nsz half %x, -1
 =>
 %r = fsub nnan -0.0, %x
 
 Name: muldivrem:582-3
-%r = fmul ninf %x, -1
+%r = fmul ninf nsz half %x, -1
 =>
 %r = fsub ninf -0.0, %x
 
 Name: muldivrem:582-4
-%r = fmul nsz %x, -1
+%r = fmul nsz half %x, -1
 =>
 %r = fsub nsz -0.0, %x
 
-; variants with nsz
+Name: muldivrem:582-5
+%r = fmul nnan ninf half %x, -1
+=>
+%r = fsub nnan ninf -0.0, %x
 
-Name: muldivrem:582
-%r = fmul %x, -1
+Name: muldivrem:582-6
+%r = fmul nnan half %x, -1
+=>
+%r = fsub nnan -0.0, %x
+
+Name: muldivrem:582-7
+%r = fmul ninf half %x, -1
+=>
+%r = fsub ninf -0.0, %x
+
+Name: muldivrem:582-8
+%r = fmul half %x, -1
 =>
 %r = fsub -0.0, %x
-
 
 Name: muldivrem:661-1 ; slow
 %x = fsub -0.0, %a
@@ -88,8 +100,7 @@ Pre: hasOneUse(%x)
 
 ; visitFRem
 
-; PR26943 (lifejacket)
-Name: muldivrem:1500
+Name: muldivrem:1500 ; PR26943 (lifejacket)
 %1 = select %A, 0, %Y ; symmetric
 %r = frem %X, %1
 =>

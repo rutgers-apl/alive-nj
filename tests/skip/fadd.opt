@@ -1,4 +1,4 @@
-Name: addsub:1338
+Name: addsub:1338-1
 ; slow
 %na = fsub half -0.0, %a
 %r  = fadd %na, %b
@@ -8,7 +8,7 @@ Name: addsub:1338
 ; they claim to also do -A + -B => -(A+B), but I don't see it
 
 ; NOTE: why?
-Name: addsub:1338
+Name: addsub:1338-2
 ; slow
 %r = fadd half C, %b
 =>
@@ -22,7 +22,7 @@ Name: addsub:1345
 %r = fsub %a, -C
 
 
-Name: addsub:1354
+Name: addsub:1354 ; PR27153
 Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
 %x = sitofp %a to half
 %r = fadd %x, C

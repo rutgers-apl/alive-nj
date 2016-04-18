@@ -1,0 +1,6 @@
+Name: ItoFPtoI
+Pre: fpMantissaWidth(%y) >= min(width(%x), width(%z))
+%y = uitofp i64 %x to half
+%z = fptoui %y to i8
+=>
+%z = ZExtOrTrunc %x

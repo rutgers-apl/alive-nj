@@ -78,7 +78,7 @@ Pre: CannotBeNegativeZero(%x) || hasNSZ(%r)
 ; =>
 ; %r = %x
 
-; Name: simplify:851-1  ; Bug?
+; Name: simplify:851-1  ; PR26746
 ; Pre: C == 0.0
 ; %1 = fsub -0.0, %x
 ; %r = fsub C, %1

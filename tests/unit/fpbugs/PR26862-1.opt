@@ -1,4 +1,5 @@
 ; ERROR: Mismatch in values
+Name: simplify:1117
 %r = fdiv half undef, %x
 =>
 %r = undef

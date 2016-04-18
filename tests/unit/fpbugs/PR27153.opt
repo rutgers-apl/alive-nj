@@ -1,4 +1,5 @@
 ; ERROR: Mismatch in values
+Name: addsub:1354
 Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
 %x = sitofp i16 %a to half
 %r = fadd %x, C
