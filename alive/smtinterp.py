@@ -86,6 +86,7 @@ def _ty_sort(ty):
     }[type(ty)]
     # NOTE: this assumes the global z3 context never changes
 
+
 class MetaTranslator(MetaVisitor):
   def __init__(cls, name, bases, dict):
     if not hasattr(cls, 'registry'):
@@ -94,7 +95,7 @@ class MetaTranslator(MetaVisitor):
     cls.registry[name.lower()] = cls
     return super(MetaTranslator, cls).__init__(name, bases, dict)
 
-class SMTTranslator(Visitor):
+class BaseSMTTranslator(Visitor):
   __metaclass__ = MetaTranslator
   log = logger.getChild('SMTTranslator')
 
@@ -152,6 +153,12 @@ class SMTTranslator(Visitor):
   def fresh_var(self, ty, prefix='undef_'):
     self.fresh += 1
     return z3.Const(prefix + str(self.fresh), _ty_sort(ty))
+
+  def _conditional_value(self, conds, v, name=''):
+    raise NotImplementedError
+
+  def _conditional_conv_value(self, conds, v, name=''):
+    raise NotImplementedError
 
   def Input(self, term):
     # TODO: unique name check
@@ -228,24 +235,26 @@ class SMTTranslator(Visitor):
     self.log.debug('_fbo: %s\n%s', term, self.attrs[term])
     x = self.eval(term.x)
     y = self.eval(term.y)
+    z = op(x,y)
 
+    conds = []
     if 'nnan' in self.attrs[term]:
       df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
-      self.add_defs(z3.Implies(self.attrs[term]['nnan'], df))
+        z3.Not(z3.fpIsNaN(z)))
+      conds.append(z3.Implies(self.attrs[term]['nnan'], df))
 
     elif 'nnan' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
+      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(z))]
 
     if 'ninf' in self.attrs[term]:
       df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
-      self.add_defs(z3.Implies(self.attrs[term]['ninf'], df))
+        z3.Not(z3.fpIsInfinite(z)))
+      conds.append(z3.Implies(self.attrs[term]['ninf'], df))
 
     elif 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
+      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(z))]
 
     if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
@@ -270,9 +279,7 @@ class SMTTranslator(Visitor):
           z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
           z)
 
-      return z
-
-    return op(x,y)
+    return self._conditional_value(conds, z, term.name)
 
   FAddInst = FBinOpHandler(operator.add)
   FSubInst = FBinOpHandler(operator.sub)
@@ -344,7 +351,17 @@ class SMTTranslator(Visitor):
     # TODO: fpext range/rounding check
     # TODO: fptrunc range/rounding check
 
-  FPTruncInst = FPExtInst
+  def FPTruncInst(self, term):
+    v = self.eval(term.arg)
+    rm = z3.get_default_rounding_mode()
+    tgt = self.type(term)
+    e = 2**(tgt.exp-1) # 1 + max exponent for tgt
+    m = 2**e
+
+    return self._conditional_conv_value(
+      [-m < v, v < m],
+      z3.fpToFP(rm, v, _ty_sort(tgt)),
+      term.name)
 
   def FPtoSIInst(self, term):
     v = self.eval(term.arg)
@@ -353,30 +370,23 @@ class SMTTranslator(Visitor):
 
     m = 2**(tgt.width-1)
 
-    self.add_defs(v >= -m, v <= m-1)
-    # this should be okay, because the bounds will round
-    # towards zero if too large for the source type, only
-    # excluding the infinities and NaN
-
-    return z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
+    # TODO: don't generate trivial conds
+    return self._conditional_conv_value(
+      [-m <= v, v <= m-1],
+      z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt)),
+      term.name)
 
   def FPtoUIInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
     tgt = self.type(term)
 
-    self.add_defs(v >= 0, v <= (2**tgt.width)-1)
+    # TODO: don't generate trivial conds
+    return self._conditional_conv_value(
+      [0 <= v, v <= (2**tgt.width)-1],
+      z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt)),
+      term.name)
 
-    return z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
-
-  # LLVM specifies: "If the value cannot fit in the floating point value,
-  # the results are undefined."
-  #
-  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
-  # requires an exponent too large for the type. Assume "results are undefined"
-  # means undefined behavior.
   def SItoFPInst(self, term):
     v = self.eval(term.arg)
     src = self.type(term.arg)
@@ -384,11 +394,15 @@ class SMTTranslator(Visitor):
 
     w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
 
-    if src.width > w:
-      m = (2**tgt.frac - 1) << (w-tgt.frac)
-      self.add_defs(v >= -m, v <= m)
+    if src.width - 1 > w:
+      m = 2**w
+      conds = [-m < v, v < m]
+    else:
+      conds = []
 
-    return z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+    return self._conditional_conv_value(conds,
+      z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
+      term.name)
 
   def UItoFPInst(self, term):
     v = self.eval(term.arg)
@@ -398,10 +412,14 @@ class SMTTranslator(Visitor):
     w = 2**(tgt.exp-1)
 
     if src.width >= w:
-      m = (2**tgt.frac-1) << (w - tgt.frac)
-      self.add_defs(z3.UGE(v, 0), z3.ULE(v, m))
+      m = 2**w
+      conds = [z3.ULE(v, m)]
+    else:
+      conds = []
 
-    return z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+    return self._conditional_conv_value(conds,
+      z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
+      term.name)
 
   _icmp_ops = {
     'eq': operator.eq,
@@ -461,15 +479,19 @@ class SMTTranslator(Visitor):
     else:
       cmp = self._fcmp_ops[term.pred](x,y)
 
+    conds = []
     if 'nnan' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)))
+      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y))]
 
     if 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)))
+      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y))]
 
     # no other flags are meaningful here?
 
-    return bool_to_BitVec(cmp)
+    return self._conditional_value(
+      conds,
+      bool_to_BitVec(cmp),
+      term.name)
 
   SelectInst = OpHandler(lambda c,x,y: z3.If(c == 1, x, y))
 
@@ -732,6 +754,153 @@ class SMTTranslator(Visitor):
     return z3.BoolVal(True)
     # NOTE: should this have semantics?
 
+class SMTPoison(BaseSMTTranslator):
+  def _conditional_value(self, conds, v, name=''):
+    self.add_nops(*conds)
+    return v
+
+  _conditional_conv_value = _conditional_value
+
+class SMTUndef(BaseSMTTranslator):
+  def _conditional_value(self, conds, v, name=''):
+    if not conds:
+      return v
+
+    self.fresh += 1
+    name = 'undef_{}_{}'.format(name, self.fresh) if name else \
+      'undef_' + str(self.fresh)
+
+    u = z3.Const(name, v.sort())
+    self.add_qvar(u)
+    return z3.If(z3.And(conds), v, u)
+
+  _conditional_conv_value = _conditional_value
+
+class SMTTranslator(BaseSMTTranslator):
+  """
+  Older translation for floating-point ops before the formal spec
+  in the paper was adopted.
+  """
+
+  def _float_binary_operator(self, term, op):
+    self.log.debug('_fbo: %s\n%s', term, self.attrs[term])
+    x = self.eval(term.x)
+    y = self.eval(term.y)
+
+    if 'nnan' in self.attrs[term]:
+      df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+      self.add_defs(z3.Implies(self.attrs[term]['nnan'], df))
+
+    elif 'nnan' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
+        z3.Not(z3.fpIsNaN(op(x,y))))
+
+    if 'ninf' in self.attrs[term]:
+      df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+      self.add_defs(z3.Implies(self.attrs[term]['ninf'], df))
+
+    elif 'ninf' in term.flags:
+      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
+        z3.Not(z3.fpIsInfinite(op(x,y))))
+
+    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
+      # NOTE: this will return a different qvar for each (in)direct reference
+      # to this term. Is this desirable?
+      b = self.fresh_bool()
+      self.add_qvar(b)
+      z = op(x,y)
+
+      c = z3.fpIsZero(z)
+      if 'nsz' in self.attrs[term]:
+        c = z3.And(self.attrs[term]['nsz'], c)
+
+      s = _ty_sort(self.type(term))
+      z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
+
+      if isinstance(term, FDivInst):
+        c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
+        if 'nsz' in self.attrs[term]:
+          c.append(self.attrs[term]['nsz'])
+
+        z = z3.If(z3.And(c),
+          z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
+          z)
+
+      return z
+
+    return op(x,y)
+
+  def FPExtInst(self, term):
+    v = self.eval(term.arg)
+    rm = z3.get_default_rounding_mode()
+    return z3.fpToFP(rm, v, _ty_sort(self.type(term)))
+    # TODO: fpext range/rounding check
+    # TODO: fptrunc range/rounding check
+
+  FPTruncInst = FPExtInst
+
+  def FPtoSIInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    m = 2**(tgt.width-1)
+
+    self.add_defs(v >= -m, v <= m-1)
+    # this should be okay, because the bounds will round
+    # towards zero if too large for the source type, only
+    # excluding the infinities and NaN
+
+    return z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
+    # LLVM specifies RTZ
+
+  def FPtoUIInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    self.add_defs(v >= 0, v <= (2**tgt.width)-1)
+
+    return z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
+    # LLVM specifies RTZ
+
+  # LLVM specifies: "If the value cannot fit in the floating point value,
+  # the results are undefined."
+  #
+  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
+  # requires an exponent too large for the type. Assume "results are undefined"
+  # means undefined behavior.
+  def SItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
+
+    if src.width > w:
+      m = (2**tgt.frac - 1) << (w-tgt.frac)
+      self.add_defs(v >= -m, v <= m)
+
+    return z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+
+  def UItoFPInst(self, term):
+    v = self.eval(term.arg)
+    src = self.type(term.arg)
+    tgt = self.type(term)
+
+    w = 2**(tgt.exp-1)
+
+    if src.width >= w:
+      m = (2**tgt.frac-1) << (w - tgt.frac)
+      self.add_defs(z3.UGE(v, 0), z3.ULE(v, m))
+
+    return z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
+
+
+
+
 
 class NewShlSemantics(SMTTranslator):
   ShlInst = SMTTranslator.ShlInst.copy(poisons = {
@@ -782,328 +951,6 @@ class FastMathUndef(SMTTranslator):
       return z3.If(mk_and(conds), z, q)
 
     return z
-
-class SMTUndef(SMTTranslator):
-  def _float_binary_operator(self, term, op):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    conds = []
-    z = op(x,y)
-    if 'nnan' in self.attrs[term]:
-      conds += [z3.Implies(self.attrs[term]['nnan'],
-        z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y)))))]
-    elif 'nnan' in term.flags:
-      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y)))]
-
-    if 'ninf' in self.attrs[term]:
-      conds += [z3.Implies(self.attrs[term]['ninf'],
-        z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y)))))]
-    elif 'ninf' in term.flags:
-      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y)))]
-
-    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
-      # NOTE: this will return a different qvar for each (in)direct reference
-      # to this term. Is this desirable?
-      b = self.fresh_bool()
-      self.add_qvar(b)
-      z = op(x,y)
-      c = z3.fpIsZero(z)
-      if 'nsz' in self.attrs[term]:
-        c = z3.And(self.attrs[term]['nsz'], c)
-
-      s = _ty_sort(self.type(term))
-      z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
-      
-      if isinstance(term, FDivInst):
-        c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
-        if 'nsz' in self.attrs[term]:
-          c.append(self.attrs[term]['nsz'])
-      
-        z = z3.If(z3.And(c),
-          z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
-          z)
-
-    if conds:
-      q = self.fresh_var(self.type(term))
-      self.add_qvar(q)
-
-      return z3.If(mk_and(conds), z, q)
-
-    return z
-
-  def FPTruncInst(self, term):
-    v = self.eval(term.arg)
-    rm = z3.get_default_rounding_mode()
-    tgt = self.type(term)
-    e = 2**(tgt.exp-1) # 1 + max exponent for tgt
-    m = 2**e
-
-    u = self.fresh_var(tgt)
-    self.add_qvar(u)
-
-    return z3.If(z3.And(-m < v, v < m), 
-      z3.fpToFP(rm, v, _ty_sort(tgt)),
-      u)
-
-  def FPtoSIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    m = 2**(tgt.width-1)
-
-    u = self.fresh_var(tgt)
-    self.add_qvar(u)
-
-    return z3.If(z3.And(v >= -m, v <= m-1),
-      z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt)),
-      u)
-    # LLVM specifies RTZ
-
-  def FPtoUIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    u = self.fresh_var(tgt)
-    self.add_qvar(u)
-
-    return z3.If(z3.And(v >= 0, v <= (2**tgt.width)-1),
-      z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt)),
-      u)
-    # LLVM specifies RTZ
-
-  # LLVM specifies: "If the value cannot fit in the floating point value,
-  # the results are undefined."
-  #
-  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
-  # requires an exponent too large for the type. Assume "results are undefined"
-  # means undefined behavior.
-
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
-
-    z = z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-    if src.width-1 > w:
-      m = 2**w
-      
-      u = self.fresh_var(tgt)
-      self.add_qvar(u)
-
-      return z3.If(z3.And(v > -m, v < m), z, u)
-
-    return z
-
-  def UItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-
-    z = z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-    if src.width >= w:
-      m = 2**w
-
-      u = self.fresh_var(tgt)
-      self.add_qvar(u)
-
-      return z3.If(z3.And(z3.UGE(v, 0), z3.ULT(v, m)), z, u)
-
-    return z
-
-  def FcmpInst(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    if term.pred == '':
-      var = z3.BitVec('fcmp_' + term.name, 4)
-      ops = self._fcmp_ops.itervalues()
-      # since _fcmp_ops should never change, this should be stable
-
-      cmp = ops.next()(x,y)
-      i = 1
-      for op in ops:
-        cmp = z3.If(var == i, op(x,y), cmp)
-        i += 1
-
-    else:
-      cmp = self._fcmp_ops[term.pred](x,y)
-
-    conds = []
-    if 'nnan' in term.flags:
-      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y))]
-
-    if 'ninf' in term.flags:
-      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y))]
-
-    # no other flags are meaningful here?
-
-    if conds:
-      u = self.fresh_var(IntType(1))
-      self.add_qvar(u)
-      return z3.If(z3.And(conds), bool_to_BitVec(cmp), u)
-
-    return bool_to_BitVec(cmp)
-
-
-class SMTPoison(SMTTranslator):
-  def _float_binary_operator(self, term, op):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    if 'nnan' in self.attrs[term]:
-      df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
-      self.add_nops(z3.Implies(self.attrs[term]['nnan'], df))
-
-    elif 'nnan' in term.flags:
-      self.add_nops(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
-
-    if 'ninf' in self.attrs[term]:
-      df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
-      self.add_nops(z3.Implies(self.attrs[term]['ninf'], df))
-
-    elif 'ninf' in term.flags:
-      self.add_nops(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
-
-    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
-      # NOTE: this will return a different qvar for each (in)direct reference
-      # to this term. Is this desirable?
-      b = self.fresh_bool()
-      self.add_qvar(b)
-      z = op(x,y)
-
-      c = z3.fpIsZero(z)
-      if 'nsz' in self.attrs[term]:
-        c = z3.And(self.attrs[term]['nsz'], c)
-
-      s = _ty_sort(self.type(term))
-      z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
-
-      if isinstance(term, FDivInst):
-        c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
-        if 'nsz' in self.attrs[term]:
-          c.append(self.attrs[term]['nsz'])
-
-        z = z3.If(z3.And(c),
-          z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
-          z)
-
-      return z
-
-    return op(x,y)
-
-  def FPTruncInst(self, term):
-    v = self.eval(term.arg)
-    rm = z3.get_default_rounding_mode()
-    tgt = self.type(term)
-    e = 2**(tgt.exp-1) # 1 + max exponent for tgt
-    m = 2**e
-
-    self.add_nops(-m < v, v < m)
-    return z3.fpToFP(rm, v, _ty_sort(tgt))
-
-  def FPtoSIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    m = 2**(tgt.width-1)
-
-    self.add_nops(v >= -m, v <= m-1)
-    # this should be okay, because the bounds will round
-    # towards zero if too large for the source type, only
-    # excluding the infinities and NaN
-
-    return z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
-
-  def FPtoUIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    self.add_nops(v >= 0, v <= (2**tgt.width)-1)
-
-    return z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
-
-  # LLVM specifies: "If the value cannot fit in the floating point value,
-  # the results are undefined."
-  #
-  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
-  # requires an exponent too large for the type. Assume "results are undefined"
-  # means undefined behavior.
-
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
-
-    if src.width-1 > w:
-      m = 2**w
-      self.add_nops(v > -m, v < m)
-
-    return z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-  def UItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-
-    if src.width >= w:
-      m = 2**w
-      self.add_defs(z3.UGE(v, 0), z3.ULT(v, m))
-
-    return z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-  def FcmpInst(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    if term.pred == '':
-      var = z3.BitVec('fcmp_' + term.name, 4)
-      ops = self._fcmp_ops.itervalues()
-      # since _fcmp_ops should never change, this should be stable
-
-      cmp = ops.next()(x,y)
-      i = 1
-      for op in ops:
-        cmp = z3.If(var == i, op(x,y), cmp)
-        i += 1
-
-    else:
-      cmp = self._fcmp_ops[term.pred](x,y)
-
-    if 'nnan' in term.flags:
-      self.add_nops(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)))
-
-    if 'ninf' in term.flags:
-      self.add_nops(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)))
-
-    # no other flags are meaningful here?
-
-    return bool_to_BitVec(cmp)
-
 
 
 class FPImpreciseUndef(SMTTranslator):

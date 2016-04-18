@@ -22,7 +22,7 @@ bench_threshold = 0.0
 timeout = 5*60*1000
 
 # which class to use for translation to SMT (by lowercased name)
-translator = 'smttranslator'
+translator = 'smtundef'
 
 # logging configuration. see logging.config docs for schema
 logs = {
