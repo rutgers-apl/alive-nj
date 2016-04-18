@@ -894,7 +894,7 @@ class SMTUndef(SMTTranslator):
 
     z = z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
 
-    if src.width > w:
+    if src.width-1 > w:
       m = 2**w
       
       u = self.fresh_var(tgt)
@@ -1057,7 +1057,7 @@ class SMTPoison(SMTTranslator):
 
     w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
 
-    if src.width > w:
+    if src.width-1 > w:
       m = 2**w
       self.add_nops(v > -m, v < m)
 
