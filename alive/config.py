@@ -43,9 +43,10 @@ logs = {
     'default': {
       'class': 'logging.handlers.RotatingFileHandler',
       'formatter': 'default',
-      'filename': 'log/alive.log',
+      'filename': 'alive.log',
       'maxBytes': 1024000,
       'backupCount': 5,
+      'delay': True,
     },
     
     'warnings': {
