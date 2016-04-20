@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from alive.main import main
-import logging
+import logging, sys
 
 try:
   main()
