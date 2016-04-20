@@ -5,6 +5,7 @@ General object representing transformations (optimizations).
 from .language import *
 from . import typing
 from . import pretty
+from .util.dispatch import singledispatch
 import logging
 import collections
 
@@ -81,13 +82,13 @@ class Transform(pretty.PrettyRepr):
     f = Formatter()
     srci = get_insts(self.src)
     
-    src_lines = [i.accept(f) for i in srci]
+    src_lines = [format(i, f) for i in srci]
     
     if logger.isEnabledFor(logging.DEBUG):
       logger.debug('Generated source\n%s\n  %s',
         '\n'.join(src_lines), pretty.pformat(f.ids, indent=2))
 
-    tgt_lines = ['{} = {}'.format(f.name(v), v.accept(f))
+    tgt_lines = ['{} = {}'.format(f.name(v), format(v, f))
                   for v in self.constant_defs()]
 
     if tgt_lines and logger.isEnabledFor(logging.DEBUG):
@@ -95,7 +96,7 @@ class Transform(pretty.PrettyRepr):
         '\n'.join(tgt_lines), pretty.pformat(f.ids, indent=2))
 
     if self.pre:
-      s += 'Pre: ' + self.pre.accept(f) + '\n'
+      s += 'Pre: ' + format(self.pre, f) + '\n'
 
     s += '\n'.join(src_lines) + '\n=>\n'
 
@@ -103,12 +104,12 @@ class Transform(pretty.PrettyRepr):
       f.ids[self.tgt] = self.src.name
 
     tgti = get_insts(self.tgt)
-    tgt_lines.extend(i.accept(f) for i in tgti if i not in f.ids)
+    tgt_lines.extend(format(i, f) for i in tgti if i not in f.ids)
 
     if not isinstance(self.tgt, Instruction):
-      tgt_lines.append(self.src.name + ' = ' + self.tgt.accept(f))
+      tgt_lines.append(self.src.name + ' = ' + format(self.tgt, f))
     else:
-      tgt_lines.append(self.tgt.accept(f))
+      tgt_lines.append(format(self.tgt, f))
 
     s += '\n'.join(tgt_lines)
 
@@ -144,7 +145,7 @@ def count_uses(dag, uses=None):
   walk(dag)
   return uses
 
-class Formatter(Visitor):
+class Formatter(object):
   def __init__(self):
     self.ids = {}
     self.names = set()
@@ -177,94 +178,119 @@ class Formatter(Visitor):
 
     assert not isinstance(term, Instruction)
 
-    return ty + term.accept(self)
+    return ty + format(term, self)
 
-  def Node(self, term):
-    return '<>'
+@singledispatch
+def format(term, fmt):
+  """
+  Return Node formatted in Alive syntax.
 
-  def Input(self, term):
-    return self.name(term)
+  fmt must be a Formatter object, which handles operand references
+  """
 
-  def BinaryOperator(self, term):
-    return self.name(term) + ' = ' + term.code + ' ' + \
-      (' '.join(term.flags) + ' ' if term.flags else '') +\
-      self.operand(term.x, term.ty) + ', ' + self.operand(term.y)
+  raise NotImplementedError("Can't format " + type(term).__name__)
 
-  def ConversionInst(self, term):
-    return self.name(term) + ' = ' + term.code + ' ' + \
-      self.operand(term.arg, term.src_ty) + \
-      (' to ' + str(term.ty) if term.ty else '')
+@format.register(Input)
+def _(term, fmt):
+ return fmt.name(term)
 
-  def IcmpInst(self, term):
-    return self.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
-      self.operand(term.x, term.ty) + ', ' + self.operand(term.y)
+@format.register(BinaryOperator)
+def _(term, fmt):
+  return fmt.name(term) + ' = ' + term.code + ' ' + \
+    (' '.join(term.flags) + ' ' if term.flags else '') +\
+    fmt.operand(term.x, term.ty) + ', ' + fmt.operand(term.y)
 
-  def FcmpInst(self, term):
-    return self.name(term) + ' = ' + 'fcmp ' + \
-      (' '.join(term.flags) + ' ' if term.flags else '') + \
-      term.pred + ' ' + self.operand(term.x, term.ty) + ', ' + \
-      self.operand(term.y)
+@format.register(ConversionInst)
+def _(term, fmt):
+  return fmt.name(term) + ' = ' + term.code + ' ' + \
+    fmt.operand(term.arg, term.src_ty) + \
+    (' to ' + str(term.ty) if term.ty else '')
 
-  def SelectInst(self, term):
-    return self.name(term) + ' = ' + 'select ' + self.operand(term.sel) + \
-      ', ' + self.operand(term.arg1, term.ty1) + \
-      ', ' + self.operand(term.arg2, term.ty2)
+@format.register(IcmpInst)
+def _(term, fmt):
+  return fmt.name(term) + ' = ' + 'icmp ' + term.pred + ' ' + \
+    fmt.operand(term.x, term.ty) + ', ' + fmt.operand(term.y)
 
-  def Literal(self, term):
-    return str(term.val)
+@format.register(FcmpInst)
+def _(term, fmt):
+  return fmt.name(term) + ' = ' + 'fcmp ' + \
+    (' '.join(term.flags) + ' ' if term.flags else '') + \
+    term.pred + ' ' + fmt.operand(term.x, term.ty) + ', ' + \
+    fmt.operand(term.y)
 
-  def FLiteral(self, term):
-    return str(term.val)
+@format.register(SelectInst)
+def _(term, fmt):
+  return fmt.name(term) + ' = ' + 'select ' + fmt.operand(term.sel) + \
+    ', ' + fmt.operand(term.arg1, term.ty1) + \
+    ', ' + fmt.operand(term.arg2, term.ty2)
 
-  def UndefValue(self, term):
-    return 'undef'
+@format.register(Literal)
+def _(term, fmt):
+  return str(term.val)
 
-  def PoisonValue(self, term):
-    return 'poison'
+@format.register(FLiteral)
+def _(term, fmt):
+  return str(term.val)
 
-  def BinaryCnxp(self, term):
-    return '(' + \
-      ' '.join((self.operand(term.x), term.code, self.operand(term.y))) + \
-      ')'
+@format.register(UndefValue)
+def _(term, fmt):
+  return 'undef'
 
-  def UnaryCnxp(self, term):
-    return term.code + self.operand(term.x)
+@format.register(PoisonValue)
+def _(term, fmt):
+  return 'poison'
 
-  def FunCnxp(self, term):
-    return term.code + '(' + \
-      ', '.join(self.operand(a) for a in term._args) + ')'
+@format.register(BinaryCnxp)
+def _(term, fmt):
+  return '(' + \
+    ' '.join((fmt.operand(term.x), term.code, fmt.operand(term.y))) + \
+    ')'
+
+@format.register(UnaryCnxp)
+def _(term, fmt):
+  return term.code + fmt.operand(term.x)
+
+@format.register(FunCnxp)
+def _(term, fmt):
+  return term.code + '(' + \
+    ', '.join(fmt.operand(a) for a in term._args) + ')'
 
 
-  def AndPred(self, term):
-    if len(term.clauses) == 0:
-      return 'true'
+@format.register(AndPred)
+def _(term, fmt):
+  if len(term.clauses) == 0:
+    return 'true'
 
-    return '(' + ' && '.join(cl.accept(self) for cl in term.clauses) + ')'
+  return '(' + ' && '.join(format(cl,fmt) for cl in term.clauses) + ')'
 
-  def OrPred(self, term):
-    if len(term.clauses) == 0:
-      return '!true'
+@format.register(OrPred)
+def _(term, fmt):
+  if len(term.clauses) == 0:
+    return '!true'
 
-    return '(' + ' || '.join(cl.accept(self) for cl in term.clauses) + ')'
+  return '(' + ' || '.join(format(cl, fmt) for cl in term.clauses) + ')'
 
-  def NotPred(self, term):
-    return '!' + term.p.accept(self)
+@format.register(NotPred)
+def _(term, fmt):
+  return '!' + format(term.p, fmt)
 
-  def Comparison(self, term):
-    code = {
-      'eq':  '==',
-      'ne':  '!=',
-      'slt': '<',
-      'sle': '<=',
-      'sgt': '>',
-      'sge': '>=',
-      'ult': 'u<',
-      'ule': 'u<=',
-      'ugt': 'u>',
-      'uge': 'u>=',
-      }[term.op]
-    
-    return ' '.join((self.operand(term.x), code, self.operand(term.y)))
+@format.register(Comparison)
+def _(term, fmt):
+  code = {
+    'eq':  '==',
+    'ne':  '!=',
+    'slt': '<',
+    'sle': '<=',
+    'sgt': '>',
+    'sge': '>=',
+    'ult': 'u<',
+    'ule': 'u<=',
+    'ugt': 'u>',
+    'uge': 'u>=',
+    }[term.op]
 
-  def FunPred(self, term):
-    return term.code + '(' + ', '.join(self.operand(a) for a in term._args) + ')'
+  return ' '.join((fmt.operand(term.x), code, fmt.operand(term.y)))
+
+@format.register(FunPred)
+def _(term, fmt):
+  return term.code + '(' + ', '.join(fmt.operand(a) for a in term._args) + ')'

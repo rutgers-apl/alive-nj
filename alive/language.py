@@ -131,11 +131,6 @@ class MetaNode(type):
     return super(MetaNode, cls).__new__(cls, name, bases, dict)
 
   def __init__(cls, name, bases, dict):
-    if not hasattr(cls, 'registry'):
-      cls.registry = {}
-    else:
-      cls.registry[name] = bases[0].__name__
-
     if hasattr(cls, 'code'):
       assert cls.code not in cls.codes
       cls.codes[cls.code] = cls
@@ -147,10 +142,6 @@ class MetaNode(type):
 
 class Node(pretty.PrettyRepr):
   __metaclass__ = MetaNode
-
-  def accept(self, visitor, *args, **kws):
-    return getattr(visitor, type(self).__name__)(self, *args, **kws)
-    # makes the stack trace slightly ugly, but saves a bunch of typing
 
   def pretty(self):
     args = (getattr(self,s) for s in self._allslots)
@@ -1062,52 +1053,9 @@ def proper_subterms(term):
 
   return itertools.chain.from_iterable(subterms(a, seen) for a in term.args())
 
-# Visitor
-# -------
-
-class MetaVisitor(type):
-  '''Fill out the visiting functions which aren't explicitly defined by a
-  class or its bases.
-
-  NOTE: it's better to subclass Visitor than use this directly.
-  '''
-
-  def __new__(cls, name, bases, dict):
-    visiting = [f for f in dict if f in Node.registry or f == 'Node']
-
-    # add explicit methods in the base classes
-    for b in bases:
-      if not hasattr(b, '_visiting'): continue
-      for f in b._visiting:
-        if f in dict: continue
-        dict[f] = getattr(b, f)
-        visiting.append(f)
-
-    dict['_visiting'] = tuple(visiting)
-    assert 'Node' in dict
-
-    # direct all non-explicitly defined visiting methods to their parents
-    for f,p in Node.registry.iteritems():
-      if f in dict: continue
-      while p not in dict: p = Node.registry[p]
-      dict[f] = dict[p]
-
-    return super(MetaVisitor, cls).__new__(cls, name, bases, dict)
-
-class Visitor(object):
-  __metaclass__ = MetaVisitor
-
-  def Node(self, term, *args, **kws):
-    raise UnmatchedCase('Visitor {0!r} cannot handle class {1!r}'.format(
-      type(self).__name__, type(term).__name__))
-
-
 
 # Errors
 # ------
-
-class UnmatchedCase(Exception):
-  pass
 
 class BadArgumentCount(Exception):
   def __init__(self, wanted, got):

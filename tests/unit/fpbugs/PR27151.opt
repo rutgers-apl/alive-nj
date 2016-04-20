@@ -1,5 +1,5 @@
 ; ERROR: Mismatch in values
-; TEST-ARGS: --translator fastmathundef
+; TEST-ARGS: --translator smtundef
 Name: simplify:813-2
 Pre: C == 0.0
 %y = fsub nnan ninf half C, %x

@@ -4,6 +4,8 @@ Translate expressions into SMT via Z3
 
 from .language import *
 from .z3util import *
+from .util.dispatch import doubledispatch
+from functools import partial
 import z3, operator, logging
 import types
 import collections
@@ -13,63 +15,7 @@ if not hasattr(z3, 'fpIsInfinite'):
 
 logger = logging.getLogger(__name__)
 
-class OpHandler(object):
-  '''These essentially act as closures, where the arguments can be read.
-  (And modified, so watch out.)
-
-  To add to a class, use
-
-    def MyClass(object):
-      field = OpHandler(op)
-
-  Then, MyClass.field returns the OpHandler, and my_obj.field returns a
-  method.
-
-  Subclasses must override __call__.
-  '''
-  def __init__(self, op):
-    self.op = op
-
-  def __call__(self, obj, term):
-    args = (obj.eval(a) for a in term.args())
-
-    return self.op(*args)
-
-  def __get__(self, obj, cls=None):
-    # return a method if invoked as obj.handler.
-    if obj:
-      return types.MethodType(self, obj, cls)
-
-    return self
-
-class SizedOpHandler(OpHandler):
-  def __call__(self, obj, term):
-    args = (obj.eval(a) for a in term.args())
-    return self.op(obj.type(term).width, *args)
-
-class BinOpHandler(OpHandler):
-  _fields = ('op', 'defined', 'poisons')
-  def __init__(self, op, defined = None, poisons = None):
-    self.op = op
-    self.poisons = poisons
-    self.defined = defined
-
-  def copy(self, **kws):
-    dict = {f: kws.get(f, getattr(self, f)) for f in self._fields}
-    return type(self)(**dict)
-
-  def __call__(self, obj, term):
-    return obj._binary_operator(term, self.op, self.defined, self.poisons)
-
-class FBinOpHandler(OpHandler):
-  def __call__(self, obj, term):
-    return obj._float_binary_operator(term, self.op)
-
-class MustAnalysis(OpHandler):
-  def __call__(self, obj, term):
-    return obj._must_analysis(term, self.op)
-
-
+# FIXME: assumes 64-bit pointers
 def _ty_sort(ty):
   'Translate a Type expression to a Z3 Sort'
 
@@ -87,7 +33,7 @@ def _ty_sort(ty):
     # NOTE: this assumes the global z3 context never changes
 
 
-class MetaTranslator(MetaVisitor):
+class MetaTranslator(type):
   def __init__(cls, name, bases, dict):
     if not hasattr(cls, 'registry'):
       cls.registry = {}
@@ -95,9 +41,8 @@ class MetaTranslator(MetaVisitor):
     cls.registry[name.lower()] = cls
     return super(MetaTranslator, cls).__init__(name, bases, dict)
 
-class BaseSMTTranslator(Visitor):
+class BaseSMTTranslator():
   __metaclass__ = MetaTranslator
-  log = logger.getChild('SMTTranslator')
 
   def __init__(self, type_model):
     self.types = type_model
@@ -114,8 +59,8 @@ class BaseSMTTranslator(Visitor):
     Translate the term (and subterms), adding its definedness conditons,
     nonpoison conditions, and quantifier variables to the state.
     '''
-    self.log.debug('eval %s', term)
-    return term.accept(self)
+    logger.debug('eval %s', term)
+    return eval(term, self)
 
   def __call__(self, term):
     '''smt(term) -> Z3 expression, def conds, nonpoison conds, qvars
@@ -127,11 +72,11 @@ class BaseSMTTranslator(Visitor):
     Quantified variables are guaranteed to be unique between different
     calls to the same SMTTranslator object.
     '''
-    self.log.debug('call %s', term)
+    logger.debug('call %s', term)
     self.defs = []
     self.nops = []
     self.qvars = []
-    v = term.accept(self)
+    v = eval(term, self)
     return v, self.defs, self.nops, self.qvars
 
   def add_defs(self, *defs):
@@ -160,12 +105,6 @@ class BaseSMTTranslator(Visitor):
   def _conditional_conv_value(self, conds, v, name=''):
     raise NotImplementedError
 
-  def Input(self, term):
-    # TODO: unique name check
-
-    ty = self.types[term]
-    return z3.Const(term.name, _ty_sort(ty))
-
   def _binary_operator(self, term, op, defined, poisons):
     x = self.eval(term.x)
     y = self.eval(term.y)
@@ -182,57 +121,8 @@ class BaseSMTTranslator(Visitor):
 
     return op(x,y)
 
-  AddInst = BinOpHandler(operator.add,
-    poisons =
-      {'nsw': lambda x,y: z3.SignExt(1,x)+z3.SignExt(1,y) == z3.SignExt(1,x+y),
-       'nuw': lambda x,y: z3.ZeroExt(1,x)+z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)})
-
-  SubInst = BinOpHandler(operator.sub,
-    poisons =
-      {'nsw': lambda x,y: z3.SignExt(1,x)-z3.SignExt(1,y) == z3.SignExt(1,x-y),
-       'nuw': lambda x,y: z3.ZeroExt(1,x)-z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)})
-
-  MulInst = BinOpHandler(operator.mul,
-    poisons =
-      {'nsw': lambda x,y: z3.SignExt(x.size(),x)*z3.SignExt(x.size(),y) == z3.SignExt(x.size(),x*y),
-       'nuw': lambda x,y: z3.ZeroExt(x.size(),x)*z3.ZeroExt(x.size(),y) == z3.ZeroExt(x.size(),x*y)})
-
-  SDivInst = BinOpHandler(operator.div,
-    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)],
-    poisons = {'exact': lambda x,y: (x/y)*y == x})
-
-  UDivInst = BinOpHandler(z3.UDiv,
-    defined = lambda x,y: [y != 0],
-    poisons = {'exact': lambda x,y: z3.UDiv(x,y)*y == x})
-
-  SRemInst = BinOpHandler(z3.SRem,
-    defined = lambda x,y: [y != 0, z3.Or(x != (1 << (x.size()-1)), y != -1)])
-
-  URemInst = BinOpHandler(z3.URem,
-    defined = lambda x,y: [y != 0])
-  
-  ShlInst = BinOpHandler(operator.lshift,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
-    poisons =
-      {'nsw': lambda x,y: (x << y) >> y == x,
-       'nuw': lambda x,y: z3.LShR(x << y, y) == x})
-
-  AShrInst = BinOpHandler(operator.rshift,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
-    poisons = {'exact': lambda x,y: (x >> y) << y == x})
-
-  LShrInst = BinOpHandler(z3.LShR,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
-    poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x})
-
-  AndInst = BinOpHandler(operator.and_)
-  OrInst = BinOpHandler(operator.or_)
-  XorInst = BinOpHandler(operator.xor)
-
-
-
   def _float_binary_operator(self, term, op):
-    self.log.debug('_fbo: %s\n%s', term, self.attrs[term])
+    logger.debug('_fbo: %s\n%s', term, self.attrs[term])
     x = self.eval(term.x)
     y = self.eval(term.y)
     z = op(x,y)
@@ -281,145 +171,6 @@ class BaseSMTTranslator(Visitor):
 
     return self._conditional_value(conds, z, term.name)
 
-  FAddInst = FBinOpHandler(operator.add)
-  FSubInst = FBinOpHandler(operator.sub)
-  FMulInst = FBinOpHandler(operator.mul)
-  FDivInst = FBinOpHandler(lambda x,y: z3.fpDiv(z3._dflt_rm(), x, y))
-  FRemInst = FBinOpHandler(z3.fpRem)
-
-  def BitcastInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    if src == tgt:  # no-op
-      return v
-
-    if isinstance(src, (IntType,PtrType)):
-      if  isinstance(tgt, (IntType,PtrType)):
-        return v  # also a no-op
-
-      if isinstance(tgt, X86FP80Type):
-        # FIXME: ensure bit 64 is correct
-        return z3.fpFP(z3.Extract(79,79,v),
-          z3.Extract(78,64,v),
-          z3.Extract(62,0,v))
-
-      if isinstance(tgt, FloatType):
-        return z3.fpToFP(v, _ty_sort(tgt))
-
-    if isinstance(src, X86FP80Type) and isinstance(tgt, (IntType,PtrType)):
-      w = z3.fpToIEEEBV(v)
-      i = z3.If(z3.Or(z3.fpIsZero(v), z3.fpIsSubnormal(v)),
-        z3.BitVecVal(0,1),
-        z3.BitVecVal(1,1))
-
-      return z3.Concat(z3.Extract(78,63,w), i, z3.Extract(62,0,w))
-
-    if isinstance(src, FloatType) and isinstance(tgt, (IntType,PtrType)):
-      return z3.fpToIEEEBV(v)
-
-    assert False
-
-  # NOTE: SExt/ZExt/Trunc should all have IntType args
-  SExtInst = SizedOpHandler(lambda size, x: z3.SignExt(size - x.size(), x))
-  ZExtInst = SizedOpHandler(lambda size, x: z3.ZeroExt(size - x.size(), x))
-  TruncInst = SizedOpHandler(lambda size, x: z3.Extract(size - 1, 0, x))
-
-  def ZExtOrTruncInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg).width
-    tgt = self.type(term).width
-
-    return zext_or_trunc(v, src, tgt)
-
-  # FIXME: obtain ptr width from model/somewhere
-  def InttoptrInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg).width
-    return zext_or_trunc(v, src, 64)
-
-  def PtrtointInst(self, term):
-    v   = self.eval(term.arg)
-    tgt = self.type(term)
-    return zext_or_trunc(v, 64, tgt)
-
-  def FPExtInst(self, term):
-    v = self.eval(term.arg)
-    rm = z3.get_default_rounding_mode()
-    return z3.fpToFP(rm, v, _ty_sort(self.type(term)))
-    # TODO: fpext range/rounding check
-    # TODO: fptrunc range/rounding check
-
-  def FPTruncInst(self, term):
-    v = self.eval(term.arg)
-    rm = z3.get_default_rounding_mode()
-    tgt = self.type(term)
-    e = 2**(tgt.exp-1) # 1 + max exponent for tgt
-    m = 2**e
-
-    return self._conditional_conv_value(
-      [-m < v, v < m],
-      z3.fpToFP(rm, v, _ty_sort(tgt)),
-      term.name)
-
-  def FPtoSIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    m = 2**(tgt.width-1)
-
-    # TODO: don't generate trivial conds
-    return self._conditional_conv_value(
-      [-m <= v, v <= m-1],
-      z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt)),
-      term.name)
-
-  def FPtoUIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    # TODO: don't generate trivial conds
-    return self._conditional_conv_value(
-      [0 <= v, v <= (2**tgt.width)-1],
-      z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt)),
-      term.name)
-
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
-
-    if src.width - 1 > w:
-      m = 2**w
-      conds = [-m < v, v < m]
-    else:
-      conds = []
-
-    return self._conditional_conv_value(conds,
-      z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
-      term.name)
-
-  def UItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-
-    if src.width >= w:
-      m = 2**w
-      conds = [z3.ULE(v, m)]
-    else:
-      conds = []
-
-    return self._conditional_conv_value(conds,
-      z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
-      term.name)
 
   _icmp_ops = {
     'eq': operator.eq,
@@ -433,14 +184,6 @@ class BaseSMTTranslator(Visitor):
     'slt': operator.lt,
     'sle': operator.le,
   }
-
-  def IcmpInst(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    cmp = self._icmp_ops[term.pred](x,y)
-
-    return bool_to_BitVec(cmp)
 
   _fcmp_ops = {
     'false': lambda x,y: z3.BoolVal(False),
@@ -461,207 +204,6 @@ class BaseSMTTranslator(Visitor):
     'true': lambda x,y: z3.BoolVal(True),
   }
 
-  def FcmpInst(self, term):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
-
-    if term.pred == '':
-      var = z3.BitVec('fcmp_' + term.name, 4)
-      ops = self._fcmp_ops.itervalues()
-      # since _fcmp_ops should never change, this should be stable
-
-      cmp = ops.next()(x,y)
-      i = 1
-      for op in ops:
-        cmp = z3.If(var == i, op(x,y), cmp)
-        i += 1
-
-    else:
-      cmp = self._fcmp_ops[term.pred](x,y)
-
-    conds = []
-    if 'nnan' in term.flags:
-      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y))]
-
-    if 'ninf' in term.flags:
-      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y))]
-
-    # no other flags are meaningful here?
-
-    return self._conditional_value(
-      conds,
-      bool_to_BitVec(cmp),
-      term.name)
-
-  SelectInst = OpHandler(lambda c,x,y: z3.If(c == 1, x, y))
-
-  def Literal(self, term):
-    ty = self.type(term)
-    if isinstance(ty, FloatType):
-      return z3.FPVal(term.val, _ty_sort(ty))
-
-    return z3.BitVecVal(term.val, ty.width)
-
-  def FLiteralVal(self, term):
-    ty = self.type(term)
-    assert isinstance(ty, FloatType)
-
-    return z3.FPVal(term.val, _ty_sort(ty))
-
-  def FLiteralNaN(self, term):
-    return z3.fpNaN(_ty_sort(self.type(term)))
-
-  def FLiteralPlusInf(self, term):
-    return z3.fpPlusInfinity(_ty_sort(self.type(term)))
-
-  def FLiteralMinusInf(self, term):
-    return z3.fpMinusInfinity(_ty_sort(self.type(term)))
-
-  def FLiteralMinusZero(self, term):
-    return z3.fpMinusZero(_ty_sort(self.type(term)))
-
-  def UndefValue(self, term):
-    ty = self.type(term)
-    x = self.fresh_var(ty)
-    self.add_qvar(x)
-    return x
-
-  def PoisonValue(self, term):
-    self.add_nops(z3.BoolVal(False))
-    return self.fresh_var(self.type(term))
-
-  # NOTE: constant expressions do no introduce poison or definedness constraints
-  #       is this reasonable?
-  # FIXME: cnxps need explicit undef checking
-  # FIXME: div/rem by 0 is undef
-  AddCnxp = BinOpHandler(operator.add)
-  SubCnxp = BinOpHandler(operator.sub)
-  MulCnxp = BinOpHandler(operator.mul)
-  SDivCnxp = BinOpHandler(operator.div)
-  UDivCnxp = BinOpHandler(z3.UDiv)
-  SRemCnxp = BinOpHandler(operator.mod)
-  URemCnxp = BinOpHandler(z3.URem)
-  ShlCnxp = BinOpHandler(operator.lshift)
-  AShrCnxp = BinOpHandler(operator.rshift)
-  LShrCnxp = BinOpHandler(z3.LShR)
-  AndCnxp = BinOpHandler(operator.and_)
-  OrCnxp = BinOpHandler(operator.or_)
-  XorCnxp = BinOpHandler(operator.xor)
-
-  NotCnxp = OpHandler(operator.inv)
-
-  def NegCnxp(self, term):
-    if isinstance(self.type(term), FloatType):
-      return z3.fpNeg(self.eval(term.x))
-
-    return -self.eval(term.x)
-
-  def AbsCnxp(self, term):
-    x = self.eval(term._args[0])
-
-    if isinstance(self.type(term), FloatType):
-      return z3.fpAbs(x)
-
-    return z3.If(x >= 0, x, -x)
-
-  def SignBitsCnxp(self, term):
-    x = self.eval(term._args[0])
-    ty = self.type(term)
-
-    #b = ComputeNumSignBits(self.fresh_bv(size), size)
-    b = self.fresh_var(ty, 'ana_')
-
-    self.add_defs(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
-
-    return b
-
-  def OneBitsCnxp(self, term):
-    x = self.eval(term._args[0])
-    b = self.fresh_var(self.type(term), 'ana_')
-
-    self.add_defs(b & ~x == 0)
-
-    return b
-
-  def ZeroBitsCnxp(self, term):
-    x = self.eval(term._args[0])
-    b = self.fresh_var(self.type(term), 'ana_')
-
-    self.add_defs(b & x == 0)
-
-    return b
-  
-  LeadingZerosCnxp = SizedOpHandler(ctlz)
-  TrailingZerosCnxp = SizedOpHandler(cttz)
-  Log2Cnxp = SizedOpHandler(bv_log2)
-  LShrFunCnxp = OpHandler(z3.LShR)
-  SMaxCnxp = OpHandler(lambda x,y: z3.If(x > y, x, y))
-  SMinCnxp = OpHandler(lambda x,y: z3.If(x > y, y, x))
-  UMaxCnxp = OpHandler(lambda x,y: z3.If(z3.UGT(x,y), x, y))
-  UMinCnxp = OpHandler(lambda x,y: z3.If(z3.UGT(x,y), y, x))
-
-  SExtCnxp = SExtInst
-  ZExtCnxp = ZExtInst
-  TruncCnxp = TruncInst
-
-  def FPExtCnxp(self, term):
-    v = self.eval(term._args[0])
-    return z3.fpToFP(z3.RNE(), v, _ty_sort(self.type(term)))
-    # TODO: fpext() range/rounding check
-    # TODO: fptrunc() range/rounding check
-
-  FPTruncCnxp = FPExtCnxp
-
-  def FPMantissaWidthCnxp(self, term):
-    ty = self.type(term._args[0])
-    return z3.BitVecVal(ty.frac, self.type(term).width)
-
-  def FPtoSICnxp(self, term): #FIXME
-    x = self.eval(term._args[0])
-    tgt = self.type(term)
-
-    return z3.fpToSBV(z3.RTZ(), x, _ty_sort(tgt))
-
-  def FPtoUICnxp(self, term): #FIXME
-    x = self.eval(term._args[0])
-    tgt = self.type(term)
-
-    return z3.fpToUBV(z3.RTZ(), x, _ty_sort(tgt))
-
-  def SItoFPCnxp(self, term): #FIXME
-    x = self.eval(term._args[0])
-    tgt = self.type(term)
-
-    return z3.fpToFP(z3.RTZ(), x, _ty_sort(tgt))
-
-  def UItoFPCnxp(self, term): #FIXME
-    x = self.eval(term._args[0])
-    tgt = self.type(term)
-
-    return z3.fpToFPUnsigned(z3.RTZ(), x, _ty_sort(tgt))
-
-  def WidthCnxp(self, term):
-    return z3.BitVecVal(self.type(term._args[0]).width, self.type(term).width)
-    # NOTE: nothing bad should happen if we don't evaluate the argument
-
-  def AndPred(self, term):
-    return mk_and([self.eval(cl) for cl in term.clauses])
-
-  def OrPred(self, term):
-    return mk_or([self.eval(cl) for cl in term.clauses])
-
-  def NotPred(self, term):
-    return z3.Not(self.eval(term.p))
-
-  def Comparison(self, term):
-    if term.op == 'eq' and isinstance(self.type(term.x), FloatType):
-      cmp = z3.fpEQ
-    else:
-      cmp = self._icmp_ops[term.op]
-      # only the signed ones can be FP, so this is safe
-
-    return cmp(self.eval(term.x), self.eval(term.y))
-
   def _must_analysis(self, term, op):
     args = (self.eval(a) for a in term._args)
 
@@ -672,17 +214,6 @@ class BaseSMTTranslator(Visitor):
     self.add_defs(z3.Implies(c, op(*args)))
     return c
 
-  CannotBeNegativeZeroPred = MustAnalysis(
-    lambda x: z3.Not(x == z3.fpMinusZero(x.sort())))
-    # or: z3.And(z3.Not(z3.fpIsNegative(x)), z3.Not(z3.fpIsZero(x)))
-
-  def FPIdenticalPred(self, term):
-    return self.eval(term._args[0]) == self.eval(term._args[1])
-
-  def FPIntegerPred(self, term):
-    x = self.eval(term._args[0])
-    return x == z3.fpRoundToIntegral(z3.RTZ(), x)
-
   def _has_attr(self, attr, term):
     if attr in term.flags:
       return z3.BoolVal(True)
@@ -691,68 +222,613 @@ class BaseSMTTranslator(Visitor):
       return self.attrs[term][attr]
 
     b = self.fresh_bool()
-    self.log.debug('Creating attr var %s for %s:%s', b, term, attr)
+    logger.debug('Creating attr var %s for %s:%s', b, term, attr)
     self.attrs[term][attr] = b
     return b
 
-  def HasNInfPred(self, term):
-    return self._has_attr('ninf', term._args[0])
 
-  def HasNNaNPred(self, term):
-    return self._has_attr('nnan', term._args[0])
+# generic function Eval
+# =====================
 
-  def HasNSWPred(self, term):
-    return self._has_attr('nsw', term._args[0])
+@doubledispatch
+def eval(term, smt):
+  """
+  Return an SMT translation of term, using smt for subterms.
+  """
 
-  def HasNSZPred(self, term):
-    return self._has_attr('nsz', term._args[0])
+  raise NotImplementedError("cannot eval {} with {}".format(
+    type(term).__name__, type(smt).__name__))
 
-  def HasNUWPred(self, term):
-    return self._has_attr('nuw', term._args[0])
+def _handler(op):
+  return lambda term,smt: op(*(smt.eval(a) for a in term.args()))
 
-  def IsExactPred(self, term):
-    return self._has_attr('exact', term._args[0])
+@eval.register(Node, BaseSMTTranslator)
+def _(term, smt):
+  raise NotImplementedError("Can't eval {} for {}".format(
+    type(term).__name__, type(smt).__name__))
 
-  IntMinPred = OpHandler(lambda x: x == 1 << (x.size()-1))
+@eval.register(Input, BaseSMTTranslator)
+def _(term, smt):
+  ty = smt.type(term)
+  return z3.Const(term.name, _ty_sort(ty))
 
-  Power2Pred = MustAnalysis(lambda x: z3.And(x != 0, x & (x-1) == 0))
-  Power2OrZPred = MustAnalysis(lambda x: x & (x-1) == 0)
+def binop(op, defined=None, poisons=None):
+  return lambda term, smt: smt._binary_operator(term, op, defined, poisons)
 
-  def ShiftedMaskPred(self, term):
-    x = self.eval(term._args[0])
+eval.register(AddInst, BaseSMTTranslator,
+  binop(operator.add,
+    poisons = {
+      'nsw': lambda x,y: z3.SignExt(1,x)+z3.SignExt(1,y) == z3.SignExt(1,x+y),
+      'nuw': lambda x,y: z3.ZeroExt(1,x)+z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)
+    }))
 
-    v = (x - 1) | x
-    return z3.And(v != 0, ((v+1) & v) == 0)
+eval.register(SubInst, BaseSMTTranslator,
+  binop(operator.sub,
+    poisons = {
+      'nsw': lambda x,y: z3.SignExt(1,x)-z3.SignExt(1,y) == z3.SignExt(1,x-y),
+      'nuw': lambda x,y: z3.ZeroExt(1,x)-z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)
+    }))
 
-  MaskZeroPred = MustAnalysis(lambda x,y: x & y == 0)
+eval.register(MulInst, BaseSMTTranslator,
+  binop(operator.mul,
+    poisons = {
+      'nsw': lambda x,y: z3.SignExt(x.size(),x)*z3.SignExt(x.size(),y)
+                  == z3.SignExt(x.size(),x*y),
+      'nuw': lambda x,y: z3.ZeroExt(x.size(),x)*z3.ZeroExt(x.size(),y)
+                  == z3.ZeroExt(x.size(),x*y)
+    }))
 
-  NSWAddPred = MustAnalysis(
-    lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y))
+eval.register(SDivInst, BaseSMTTranslator,
+  binop(operator.div,
+    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)],
+    poisons = {'exact': lambda x,y: (x/y)*y == x}))
 
-  NUWAddPred = MustAnalysis(
-    lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y))
+eval.register(UDivInst, BaseSMTTranslator,
+  binop(z3.UDiv,
+    defined = lambda x,y: [y != 0],
+    poisons = {'exact': lambda x,y: z3.UDiv(x,y)*y == x}))
 
-  NSWSubPred = MustAnalysis(
-    lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y))
+eval.register(SRemInst, BaseSMTTranslator,
+  binop(z3.SRem,
+    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)]))
 
-  NUWSubPred = MustAnalysis(
-    lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y))
+eval.register(URemInst, BaseSMTTranslator,
+  binop(z3.URem,
+    defined = lambda x,y: [y != 0]))
 
-  @OpHandler
-  def NSWMulPred(x,y):
-    size = x.size()
-    return z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
+eval.register(ShlInst, BaseSMTTranslator,
+  binop(operator.lshift,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {
+      'nsw': lambda x,y: (x << y) >> y == x,
+      'nuw': lambda x,y: z3.LShR(x << y, y) == x}))
 
-  @OpHandler
-  def NUWMulPred(x,y):
-    size = x.size()
-    return z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
+eval.register(AShrInst, BaseSMTTranslator,
+  binop(operator.rshift,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: (x >> y) << y == x}))
 
-  NUWShlPred = OpHandler(lambda x,y: z3.LShR(x << y, y) == x)
+eval.register(LShrInst, BaseSMTTranslator,
+  binop(z3.LShR,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x}))
 
-  def OneUsePred(self, term):
-    return z3.BoolVal(True)
-    # NOTE: should this have semantics?
+eval.register(AndInst, BaseSMTTranslator, binop(operator.and_))
+eval.register(OrInst, BaseSMTTranslator, binop(operator.or_))
+eval.register(XorInst, BaseSMTTranslator, binop(operator.xor))
+
+
+def fbinop(op):
+  return lambda term,smt: smt._float_binary_operator(term, op)
+
+eval.register(FAddInst, BaseSMTTranslator, fbinop(operator.add))
+eval.register(FSubInst, BaseSMTTranslator, fbinop(operator.sub))
+eval.register(FMulInst, BaseSMTTranslator, fbinop(operator.mul))
+eval.register(FDivInst, BaseSMTTranslator, fbinop(
+  lambda x,y: z3.fpDiv(z3.get_default_rounding_mode(), x, y)))
+eval.register(FRemInst, BaseSMTTranslator, fbinop(z3.fpRem))
+
+
+@doubledispatch
+def _eval_bitcast(src, tgt, v):
+  """
+  Return SMT expression converting v from src to tgt.
+  
+  Assumes src and tgt have the same bit width.
+  """
+  raise NotImplementedError
+
+@_eval_bitcast.register(IntType, IntType)
+@_eval_bitcast.register(IntType, PtrType)
+@_eval_bitcast.register(PtrType, IntType)
+@_eval_bitcast.register(PtrType, PtrType)
+@_eval_bitcast.register(FloatType, FloatType)
+def _(src, tgt, v):
+  return v
+
+
+@_eval_bitcast.register(IntType, FloatType)
+@_eval_bitcast.register(PtrType, FloatType)
+def _(src, tgt, v):
+  return z3.fpToFP(v, _ty_sort(tgt))
+
+@_eval_bitcast.register(FloatType, IntType)
+@_eval_bitcast.register(FloatType, PtrType)
+def _(src, tgt, v):
+  return z3.fpToIEEEBV(v)
+
+@_eval_bitcast.register(IntType, X86FP80Type)
+@_eval_bitcast.register(PtrType, X86FP80Type)
+def _(src, tgt, v):
+  return z3.fpFP(z3.Extract(79,79,v),
+    z3.Extract(78,64,v),
+    z3.Extract(62,0,v))
+
+@_eval_bitcast.register(X86FP80Type, IntType)
+@_eval_bitcast.register(X86FP80Type, PtrType)
+def _(src, tgt, v):
+  w = z3.fpToIEEEBV(v)
+  i = z3.If(z3.Or(z3.fpIsZero(v), z3.fpIsSubnormal(v)),
+    z3.BitVecVal(0,1),
+    z3.BitVecVal(1,1))
+
+  return z3.Concat(z3.Extract(78,63,w), i, z3.Extract(62,0,w))
+
+
+def _convert(op):
+  return lambda term, smt: \
+    op(smt.type(term.arg), smt.type(term), smt.eval(term.arg))
+
+eval.register(BitcastInst, BaseSMTTranslator, _convert(_eval_bitcast))
+
+eval.register(SExtInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: z3.SignExt(t.width - s.width, v)))
+
+eval.register(ZExtInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: z3.ZeroExt(t.width - s.width, v)))
+
+eval.register(TruncInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: z3.Extract(t.width-1, 0, v)))
+
+eval.register(ZExtOrTruncInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: zext_or_trunc(v, s.width, t.width)))
+
+# FIXME: don't assume 64-bit pointers
+eval.register(PtrtointInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: zext_or_trunc(v, 64, t.width)))
+
+eval.register(InttoptrInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: zext_or_trunc(v, s.width, 64)))
+
+eval.register(FPExtInst, BaseSMTTranslator, _convert(
+  lambda s,t,v: z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))))
+
+@eval.register(FPTruncInst, BaseSMTTranslator)
+def _fptrunc(term, smt):
+  v = smt.eval(term.arg)
+  tgt = smt.type(term)
+  e = 2**(tgt.exp-1) # max exponent + 1
+  m = 2**e
+  
+  rm = z3.get_default_rounding_mode()
+  return smt._conditional_conv_value(
+    [v > -m, v < m],
+    z3.fpTpFP(rm, v, _ty_sort(tgt)),
+    term.name)
+
+@eval.register(FPtoSIInst, BaseSMTTranslator)
+def _fptosi(term, smt):
+  v = smt.eval(term.arg)
+  src = smt.type(term.arg)
+  tgt = smt.type(term)
+
+  m = 2**(tgt.width-1)
+
+  # TODO: don't generate trivial conds
+  return smt._conditional_conv_value(
+    [v >= -m, v <= m-1],
+    z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt)),
+    term.name)
+
+@eval.register(FPtoUIInst, BaseSMTTranslator)
+def _fptoui(term, smt):
+  v = smt.eval(term.arg)
+  src = smt.type(term.arg)
+  tgt = smt.type(term)
+
+  # TODO: don't generate trivial conds
+  return smt._conditional_conv_value(
+    [0 <= v, v <= (2**tgt.width)-1],
+    z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt)),
+    term.name)
+
+@eval.register(SItoFPInst, BaseSMTTranslator)
+def _sitofp(term, smt):
+  v = smt.eval(term.arg)
+  src = smt.type(term.arg)
+  tgt = smt.type(term)
+
+  w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
+
+  if src.width - 1 > w:
+    m = 2**w
+    conds = [-m < v, v < m]
+  else:
+    conds = []
+
+  return smt._conditional_conv_value(conds,
+    z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
+    term.name)
+
+@eval.register(UItoFPInst, BaseSMTTranslator)
+def _uitofp(term, smt):
+  v = smt.eval(term.arg)
+  src = smt.type(term.arg)
+  tgt = smt.type(term)
+
+  w = 2**(tgt.exp-1)
+
+  if src.width >= w:
+    m = 2**w
+    conds = [z3.ULE(v, m)]
+  else:
+    conds = []
+
+  return smt._conditional_conv_value(conds,
+    z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
+    term.name)
+
+@eval.register(IcmpInst, BaseSMTTranslator)
+def _icmp(term, smt):
+  x = smt.eval(term.x)
+  y = smt.eval(term.y)
+
+  cmp = smt._icmp_ops[term.pred](x,y)
+
+  return bool_to_BitVec(cmp)
+
+@eval.register(FcmpInst, BaseSMTTranslator)
+def _fcmp(term, smt):
+  x = smt.eval(term.x)
+  y = smt.eval(term.y)
+
+  if term.pred == '':
+    var = z3.BitVec('fcmp_' + term.name, 4)
+    ops = smt._fcmp_ops.itervalues()
+    # since _fcmp_ops should never change, this should be stable
+
+    cmp = ops.next()(x,y)
+    i = 1
+    for op in ops:
+      cmp = z3.If(var == i, op(x,y), cmp)
+      i += 1
+
+  else:
+    cmp = smt._fcmp_ops[term.pred](x,y)
+
+  conds = []
+  if 'nnan' in term.flags:
+    conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y))]
+
+  if 'ninf' in term.flags:
+    conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y))]
+
+  return smt._conditional_value(
+    conds,
+    bool_to_BitVec(cmp),
+    term.name)
+
+eval.register(SelectInst, BaseSMTTranslator,
+  _handler(lambda c,x,y: z3.If(c == 1, x, y)))
+
+
+# Constants
+# ---------
+
+@eval.register(Literal, BaseSMTTranslator)
+def _literal(term, smt):
+  ty = smt.type(term)
+  if isinstance(ty, FloatType):
+    return z3.FPVal(term.val, _ty_sort(ty))
+
+  return z3.BitVecVal(term.val, ty.width)
+
+eval.register(FLiteralVal, BaseSMTTranslator,
+  lambda term, smt: z3.FPVal(term.val, _ty_sort(smt.type(term))))
+
+eval.register(FLiteralNaN, BaseSMTTranslator,
+  lambda term, smt: z3.fpNaN(_ty_sort(smt.type(term))))
+
+eval.register(FLiteralPlusInf, BaseSMTTranslator,
+  lambda term, smt: z3.fpPlusInfinity(_ty_sort(smt.type(term))))
+
+eval.register(FLiteralMinusInf, BaseSMTTranslator,
+  lambda term, smt: z3.fpMinusInfinity(_ty_sort(smt.type(term))))
+
+eval.register(FLiteralMinusZero, BaseSMTTranslator,
+  lambda term, smt: z3.fpMinusZero(_ty_sort(smt.type(term))))
+
+@eval.register(UndefValue, BaseSMTTranslator)
+def _undef(term, smt):
+  ty = smt.type(term)
+  x = smt.fresh_var(ty)
+  smt.add_qvar(x)
+  return x
+
+@eval.register(PoisonValue, BaseSMTTranslator)
+def _poison(term, smt):
+  smt.add_nops(z3.BoolVal(False))
+  return smt.fresh_var(smt.type(term))
+
+# NOTE: constant expressions do not introduce poison or definedness constraints
+#       is this reasonable?
+# FIXME: div/rem by 0 is undef
+# NOTE: better to use _handler here instead binop?
+eval.register(AddCnxp, BaseSMTTranslator, binop(operator.add))
+eval.register(SubCnxp, BaseSMTTranslator, binop(operator.sub))
+eval.register(MulCnxp, BaseSMTTranslator, binop(operator.mul))
+#eval.register(SDivCnxp, BaseSMTTranslator, binop(operator.div))
+eval.register(UDivCnxp, BaseSMTTranslator, binop(z3.UDiv))
+eval.register(SRemCnxp, BaseSMTTranslator, binop(operator.mod))
+eval.register(URemCnxp, BaseSMTTranslator, binop(z3.URem))
+eval.register(ShlCnxp, BaseSMTTranslator, binop(operator.lshift))
+eval.register(AShrCnxp, BaseSMTTranslator, binop(operator.rshift))
+eval.register(LShrCnxp, BaseSMTTranslator, binop(z3.LShR))
+eval.register(AndCnxp, BaseSMTTranslator, binop(operator.and_))
+eval.register(OrCnxp, BaseSMTTranslator, binop(operator.or_))
+eval.register(XorCnxp, BaseSMTTranslator, binop(operator.xor))
+
+# special case because Z3 4.4.1 doesn't do FP div correctly
+@eval.register(SDivCnxp, BaseSMTTranslator)
+def _sdiv(term, smt):
+  if isinstance(smt.type(term), FloatType):
+    return z3.fpDiv(z3.get_current_rounding_mode(),
+      smt.eval(term.x), smt.eval(term.y))
+
+  return smt.eval(term.x) / smt.eval(term.y)
+
+eval.register(NotCnxp, BaseSMTTranslator,
+  lambda term, smt: ~smt.eval(term.x))
+
+@eval.register(NegCnxp, BaseSMTTranslator)
+def _neg(term, smt):
+  if isinstance(smt.type(term), FloatType):
+    return z3.fpNeg(smt.eval(term.x))
+
+  return -smt.eval(term.x)
+
+@eval.register(AbsCnxp, BaseSMTTranslator)
+def _abs(term, smt):
+  x = smt.eval(term._args[0])
+
+  if isinstance(smt.type(term), FloatType):
+    return z3.fpAbs(x)
+
+  return z3.If(x >= 0, x, -x)
+
+@eval.register(SignBitsCnxp, BaseSMTTranslator)
+def _signbits(term, smt):
+  x = smt.eval(term._args[0])
+  ty = smt.type(term)
+
+  #b = ComputeNumSignBits(smt.fresh_bv(size), size)
+  b = smt.fresh_var(ty, 'ana_')
+
+  smt.add_defs(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
+
+  return b
+
+@eval.register(OneBitsCnxp, BaseSMTTranslator)
+def _ones(term, smt):
+  x = smt.eval(term._args[0])
+  b = smt.fresh_var(smt.type(term), 'ana_')
+
+  smt.add_defs(b & ~x == 0)
+  # FIXME: does this make sense in the target?
+
+  return b
+
+@eval.register(ZeroBitsCnxp, BaseSMTTranslator)
+def _zeros(term, smt):
+  x = smt.eval(term._args[0])
+  b = smt.fresh_var(smt.type(term), 'ana_')
+
+  smt.add_defs(b & x == 0)
+  # FIXME: does this make sense in the target?
+
+  return b
+
+eval.register(LeadingZerosCnxp, BaseSMTTranslator,
+  lambda term,smt: ctlz(smt.type(term).width,
+    smt.eval(term._args[0])))
+
+eval.register(TrailingZerosCnxp, BaseSMTTranslator,
+  lambda term,smt: cttz(smt.type(term).width,
+    smt.eval(term._args[0])))
+
+eval.register(Log2Cnxp, BaseSMTTranslator,
+  lambda term,smt: bv_log2(smt.type(term).width,
+    smt.eval(term._args[0])))
+
+eval.register(LShrFunCnxp, BaseSMTTranslator, _handler(z3.LShR))
+eval.register(SMaxCnxp, BaseSMTTranslator,
+  _handler(lambda x,y: z3.If(x > y, x, y)))
+eval.register(SMinCnxp, BaseSMTTranslator,
+  _handler(lambda x,y: z3.If(x > y, y, x)))
+eval.register(UMaxCnxp, BaseSMTTranslator,
+  _handler(lambda x,y: z3.If(z3.UGT(x, y), x, y)))
+eval.register(UMinCnxp, BaseSMTTranslator,
+  _handler(lambda x,y: z3.If(z3.UGT(x, y), y, x)))
+
+
+@eval.register(SExtCnxp, BaseSMTTranslator)
+def _(term, smt):
+  v = smt.eval(term._args[0])
+  src = smt.type(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.SignExt(tgt.width - src.width, v)
+
+@eval.register(ZExtCnxp, BaseSMTTranslator)
+def _(term, smt):
+  v = smt.eval(term._args[0])
+  src = smt.type(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.ZeroExt(tgt.width - src.width, v)
+
+@eval.register(TruncCnxp, BaseSMTTranslator)
+def _(term, smt):
+  v = smt.eval(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.Extract(tgt.width - 1, 0, v)
+
+@eval.register(FPExtCnxp, BaseSMTTranslator)
+@eval.register(FPTruncCnxp, BaseSMTTranslator)
+def _(term, smt):
+  v = smt.eval(term._args[0])
+  return z3.fpToFP(z3.RNE(), v, _ty_sort(smt.type(term)))
+
+@eval.register(FPMantissaWidthCnxp, BaseSMTTranslator)
+def _mantissa(term, smt):
+  ty = smt.type(term._args[0])
+  return z3.BitVecVal(ty.frac, smt.type(term).width)
+
+@eval.register(FPtoSICnxp, BaseSMTTranslator) #FIXME
+def _fptosi(term, smt):
+  x = smt.eval(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.fpToSBV(z3.RTZ(), x, _ty_sort(tgt))
+
+@eval.register(FPtoUICnxp, BaseSMTTranslator) #FIXME
+def _fptoui(term, smt):
+  x = smt.eval(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.fpToUBV(z3.RTZ(), x, _ty_sort(tgt))
+
+@eval.register(SItoFPCnxp, BaseSMTTranslator) #FIXME
+def _sitofp(term, smt):
+  x = smt.eval(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.fpToFP(z3.RTZ(), x, _ty_sort(tgt))
+
+@eval.register(UItoFPCnxp, BaseSMTTranslator) #FIXME
+def _uitofp(term, smt):
+  x = smt.eval(term._args[0])
+  tgt = smt.type(term)
+
+  return z3.fpToFPUnsigned(z3.RTZ(), x, _ty_sort(tgt))
+
+@eval.register(WidthCnxp, BaseSMTTranslator)
+def _width(term, smt):
+  return z3.BitVecVal(smt.type(term._args[0]).width, smt.type(term).width)
+  # NOTE: nothing bad should happen if we don't evaluate the argument
+
+
+
+# Predicates
+# ----------
+
+eval.register(AndPred, BaseSMTTranslator,
+  lambda term, smt: mk_and([smt.eval(c) for c in term.clauses]))
+
+eval.register(OrPred, BaseSMTTranslator,
+  lambda term, smt: mk_or([smt.eval(c) for c in term.clauses]))
+
+eval.register(NotPred, BaseSMTTranslator,
+  lambda term, smt: z3.Not(smt.eval(term.p)))
+
+@eval.register(Comparison, BaseSMTTranslator)
+def _comparison(term, smt):
+  if term.op == 'eq' and isinstance(smt.type(term.x), FloatType):
+    cmp = z3.fpEQ
+  else:
+    cmp = smt._icmp_ops[term.op]
+    # only the signed ones can be FP, so this is safe
+
+  return cmp(smt.eval(term.x), smt.eval(term.y))
+
+def _must(op):
+  return lambda t,s: s._must_analysis(t, op)
+
+eval.register(CannotBeNegativeZeroPred, BaseSMTTranslator,
+  _must(lambda x: z3.Not(x == z3.fpMinusZero(x.sort()))))
+
+eval.register(FPIdenticalPred, BaseSMTTranslator, _handler(operator.eq))
+
+eval.register(FPIntegerPred, BaseSMTTranslator,
+  _handler(lambda x: x == z3.fpRoundToIntegral(z3.RTZ(), x)))
+
+
+def _has_attr(attr):
+  return lambda t,s: s._has_attr(attr, t._args[0])
+
+eval.register(HasNInfPred, BaseSMTTranslator, _has_attr('ninf'))
+eval.register(HasNNaNPred, BaseSMTTranslator, _has_attr('nnan'))
+eval.register(HasNSWPred, BaseSMTTranslator, _has_attr('nsw'))
+eval.register(HasNSZPred, BaseSMTTranslator, _has_attr('nsz'))
+eval.register(HasNUWPred, BaseSMTTranslator, _has_attr('nuw'))
+eval.register(IsExactPred, BaseSMTTranslator, _has_attr('exact'))
+
+eval.register(IntMinPred, BaseSMTTranslator,
+  _handler(lambda x: x == 1 << (x.size()-1)))
+
+eval.register(Power2Pred, BaseSMTTranslator,
+  _must(lambda x: z3.And(x != 0, x & (x-1) == 0)))
+
+eval.register(Power2OrZPred, BaseSMTTranslator,
+  _must(lambda x: x & (x-1) == 0))
+
+@eval.register(ShiftedMaskPred, BaseSMTTranslator)
+def _(term, smt):
+  x = smt.eval(term._args[0])
+  v = (x-1) | x
+  return z3.And(v != 0, ((v+1) & v) == 0)
+
+eval.register(MaskZeroPred, BaseSMTTranslator,
+  _must(lambda x,y: x & y == 0))
+
+eval.register(NSWAddPred, BaseSMTTranslator,
+  _must(lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y)))
+
+eval.register(NUWAddPred, BaseSMTTranslator,
+  _must(lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)))
+
+eval.register(NSWSubPred, BaseSMTTranslator,
+  _must(lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y)))
+
+eval.register(NUWSubPred, BaseSMTTranslator,
+  _must(lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)))
+
+@eval.register(NSWMulPred, BaseSMTTranslator)
+@_handler
+def _(x,y):
+  size = x.size()
+  return z3.SignExt(size,x) * z3.SignExt(size,y) == z3.SignExt(size,x*y)
+
+@eval.register(NUWMulPred, BaseSMTTranslator)
+@_handler
+def _(x,y):
+  size = x.size()
+  return z3.ZeroExt(size,x) * z3.ZeroExt(size,y) == z3.ZeroExt(size,x*y)
+
+eval.register(NUWShlPred, BaseSMTTranslator,
+  _handler(lambda x,y: z3.LShR(x << y, y) == x))
+
+# NOTE: should this have semantics?
+eval.register(OneUsePred, BaseSMTTranslator, lambda t,s: z3.BoolVal(True))
+
+
+# SMT Translators
+# ===============
+
+class SMTTranslator(BaseSMTTranslator):
+  """Just for use elsewhere"""
+  pass
 
 class SMTPoison(BaseSMTTranslator):
   def _conditional_value(self, conds, v, name=''):
@@ -776,252 +852,53 @@ class SMTUndef(BaseSMTTranslator):
 
   _conditional_conv_value = _conditional_value
 
-class SMTTranslator(BaseSMTTranslator):
-  """
-  Older translation for floating-point ops before the formal spec
-  in the paper was adopted.
-  """
 
-  def _float_binary_operator(self, term, op):
-    self.log.debug('_fbo: %s\n%s', term, self.attrs[term])
-    x = self.eval(term.x)
-    y = self.eval(term.y)
+class NewShlSemantics(BaseSMTTranslator):
+  pass
 
-    if 'nnan' in self.attrs[term]:
-      df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
-      self.add_defs(z3.Implies(self.attrs[term]['nnan'], df))
-
-    elif 'nnan' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y))))
-
-    if 'ninf' in self.attrs[term]:
-      df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
-      self.add_defs(z3.Implies(self.attrs[term]['ninf'], df))
-
-    elif 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
-
-    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
-      # NOTE: this will return a different qvar for each (in)direct reference
-      # to this term. Is this desirable?
-      b = self.fresh_bool()
-      self.add_qvar(b)
-      z = op(x,y)
-
-      c = z3.fpIsZero(z)
-      if 'nsz' in self.attrs[term]:
-        c = z3.And(self.attrs[term]['nsz'], c)
-
-      s = _ty_sort(self.type(term))
-      z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
-
-      if isinstance(term, FDivInst):
-        c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
-        if 'nsz' in self.attrs[term]:
-          c.append(self.attrs[term]['nsz'])
-
-        z = z3.If(z3.And(c),
-          z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
-          z)
-
-      return z
-
-    return op(x,y)
-
-  def FPExtInst(self, term):
-    v = self.eval(term.arg)
-    rm = z3.get_default_rounding_mode()
-    return z3.fpToFP(rm, v, _ty_sort(self.type(term)))
-    # TODO: fpext range/rounding check
-    # TODO: fptrunc range/rounding check
-
-  FPTruncInst = FPExtInst
-
-  def FPtoSIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    m = 2**(tgt.width-1)
-
-    self.add_defs(v >= -m, v <= m-1)
-    # this should be okay, because the bounds will round
-    # towards zero if too large for the source type, only
-    # excluding the infinities and NaN
-
-    return z3.fpToSBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
-
-  def FPtoUIInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    self.add_defs(v >= 0, v <= (2**tgt.width)-1)
-
-    return z3.fpToUBV(z3.RTZ(), v, _ty_sort(tgt))
-    # LLVM specifies RTZ
-
-  # LLVM specifies: "If the value cannot fit in the floating point value,
-  # the results are undefined."
-  #
-  # It is unclear what "cannot fit" means. Assume a value cannot fit if it
-  # requires an exponent too large for the type. Assume "results are undefined"
-  # means undefined behavior.
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1) # 1 + maximum value of the exponent
-
-    if src.width > w:
-      m = (2**tgt.frac - 1) << (w-tgt.frac)
-      self.add_defs(v >= -m, v <= m)
-
-    return z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-  def UItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-
-    if src.width >= w:
-      m = (2**tgt.frac-1) << (w - tgt.frac)
-      self.add_defs(z3.UGE(v, 0), z3.ULE(v, m))
-
-    return z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-
-
-
-
-class NewShlSemantics(SMTTranslator):
-  ShlInst = SMTTranslator.ShlInst.copy(poisons = {
+eval.register(ShlInst, NewShlSemantics,
+  binop(operator.lshift,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {
     'nsw': lambda a,b: z3.Or((a << b) >> b == a,
                              z3.And(a == 1, b == b.size() - 1)),
-    'nuw': lambda a,b: z3.LShR(a << b, b) == a})
+    'nuw': lambda a,b: z3.LShR(a << b, b) == a}))
 
-class FastMathUndef(SMTTranslator):
-  def _float_binary_operator(self, term, op):
-    x = self.eval(term.x)
-    y = self.eval(term.y)
 
+class SMTPoisonNewShl(NewShlSemantics, SMTPoison):
+  pass
+
+class SMTUndefNewShl(NewShlSemantics, SMTUndef):
+  pass
+
+
+class FPImpreciseUndef(SMTUndef):
+  pass
+
+@eval.register(SItoFPInst, FPImpreciseUndef)
+def _(term, smt):
+  v = smt.eval(term.arg)
+  src = smt.type(term.arg)
+  tgt = smt.type(term)
+
+  w = 2**(tgt.exp)-1
+
+  if src.width > w:
+    m = (2**tgt.frac-1) << (w - tgt.frac)
+    conds = [v >= -m, v <= m]
+  else:
     conds = []
-    z = op(x,y)
-    if 'nnan' in self.attrs[term]:
-      conds += [z3.Implies(self.attrs[term]['nnan'],
-        z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y)))))]
-    elif 'nnan' in term.flags:
-      conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
-        z3.Not(z3.fpIsNaN(op(x,y)))]
 
-    if 'ninf' in self.attrs[term]:
-      conds += [z3.Implies(self.attrs[term]['ninf'],
-        z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y)))))]
-    elif 'ninf' in term.flags:
-      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y)))]
-
-    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
-      # NOTE: this will return a different qvar for each (in)direct reference
-      # to this term. Is this desirable?
-      b = self.fresh_bool()
-      self.add_qvar(b)
-      z = op(x,y)
-      c = z3.fpIsZero(z)
-      if 'nsz' in self.attrs[term]:
-        c = z3.And(self.attrs[term]['nsz'], c)
-
-      nz = z3.fpMinusZero(_ty_sort(self.type(term)))
-      z = z3.If(c, z3.If(b, 0, nz), z)
-
-    if conds:
-      q = self.fresh_var(self.type(term))
-      self.add_qvar(q)
-
-      return z3.If(mk_and(conds), z, q)
-
-    return z
+  b = smt.fresh_bool()
+  smt.add_qvar(b)
+  sort = _ty_sort(tgt)
+  return smt._conditional_conv_value(
+    conds,
+    z3.If(b, z3.fpToFP(z3.RTN(), v, sort), z3.fpToFP(z3.RTP(),v,sort)),
+    term.name)
 
 
-class FPImpreciseUndef(SMTTranslator):
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp)-1
-
-    if src.width > w:
-      m = (2**tgt.frac-1) << (w - tgt.frac)
-      self.add_defs(v >= -m, v <= m)
-
-    b = self.fresh_bool()
-    self.add_qvar(b)
-    sort = _ty_sort(tgt)
-    return z3.If(b, z3.fpToFP(z3.RTN(), v, sort), z3.fpToFP(z3.RTP(),v,sort))
-
-class FPOverflowUndef(SMTTranslator):
-  def SItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-    z = z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-    if src.width <= w:
-      return z
-
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
-
-    m = (2**tgt.frac - 1) << (w-tgt.frac)
-    return z3.If(z3.And(v >= -m, v <= m), z, q)
-
-  def UItoFPInst(self, term):
-    v = self.eval(term.arg)
-    src = self.type(term.arg)
-    tgt = self.type(term)
-
-    w = 2**(tgt.exp-1)
-
-    z = z3.fpToFPUnsigned(z3.get_default_rounding_mode(), v, _ty_sort(tgt))
-
-    if src.width < w:
-      return z
-
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
-
-    m = (2**tgt.frac-1) << (w - tgt.frac)
-    return z3.If(z3.And(z3.UGE(v, 0), z3.ULE(v, m)), z, q)
-
-  def FPTrunc(self, term):
-    v = self.eval(term.arg)
-
-    w = 2**(tgt.exp-1)
-    m = (2**tgt.frac-1) << (w - tgt.frac)
-
-    q = self.fresh_var(tgt)
-    self.add_qvar(q)
-
-    return z3.If(
-      z3.Or(z3.fpIsNaN(v), z3.fpIsInfinite(v),
-            z3.And(v >= -m, v <= m)),
-      z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt)),
-      q)
-
-class OldNSZ(SMTTranslator):
+class OldNSZ(BaseSMTTranslator):
   def _float_binary_operator(self, term, op):
     x = self.eval(term.x)
     y = self.eval(term.y)
@@ -1043,7 +920,7 @@ class OldNSZ(SMTTranslator):
 
     return op(x,y)
 
-class BrokenNSZ(SMTTranslator):
+class BrokenNSZ(BaseSMTTranslator):
   def _float_binary_operator(self, term, op):
     x = self.eval(term.x)
     y = self.eval(term.y)
