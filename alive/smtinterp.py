@@ -401,7 +401,7 @@ eval.register(InttoptrInst, BaseSMTTranslator, _convert(
   lambda s,t,v: zext_or_trunc(v, s.width, 64)))
 
 eval.register(FPExtInst, BaseSMTTranslator, _convert(
-  lambda s,t,v: z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(tgt))))
+  lambda s,t,v: z3.fpToFP(z3.get_default_rounding_mode(), v, _ty_sort(t))))
 
 @eval.register(FPTruncInst, BaseSMTTranslator)
 def _fptrunc(term, smt):
