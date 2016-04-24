@@ -10,8 +10,13 @@ import z3, operator, logging
 import types
 import collections
 
-if not hasattr(z3, 'fpIsInfinite'):
-  z3.fpIsInfinite = z3.fpIsInf
+# Z3 changed the API slightly after 4.4.1. This patches the old API
+# to look like the new one. 
+# TODO: remove once we can drop support for 4.4.1
+if hasattr(z3, 'fpIsInfinite'):
+  _fpFP = z3.fpFP
+  z3.fpFP = lambda sgn,exp,sig: _fpFP(sgn, sig, exp)
+  z3.fpIsInf = z3.fpIsInfinite
 
 logger = logging.getLogger(__name__)
 
@@ -138,13 +143,13 @@ class BaseSMTTranslator():
         z3.Not(z3.fpIsNaN(z))]
 
     if 'ninf' in self.attrs[term]:
-      df = z3.And(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(z)))
+      df = z3.And(z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
+        z3.Not(z3.fpIsInf(z)))
       conds.append(z3.Implies(self.attrs[term]['ninf'], df))
 
     elif 'ninf' in term.flags:
-      conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(z))]
+      conds += [z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
+        z3.Not(z3.fpIsInf(z))]
 
     if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
@@ -511,7 +516,7 @@ def _fcmp(term, smt):
     conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y))]
 
   if 'ninf' in term.flags:
-    conds += [z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y))]
+    conds += [z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y))]
 
   return smt._conditional_value(
     conds,
@@ -908,8 +913,8 @@ class OldNSZ(BaseSMTTranslator):
         z3.Not(z3.fpIsNaN(op(x,y))))
 
     if 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
+      self.add_defs(z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
+        z3.Not(z3.fpIsInf(op(x,y))))
 
     if 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
@@ -930,8 +935,8 @@ class BrokenNSZ(BaseSMTTranslator):
         z3.Not(z3.fpIsNaN(op(x,y))))
 
     if 'ninf' in term.flags:
-      self.add_defs(z3.Not(z3.fpIsInfinite(x)), z3.Not(z3.fpIsInfinite(y)),
-        z3.Not(z3.fpIsInfinite(op(x,y))))
+      self.add_defs(z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
+        z3.Not(z3.fpIsInf(op(x,y))))
 
     if 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
