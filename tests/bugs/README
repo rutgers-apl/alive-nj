@@ -1,0 +1,41 @@
+These optimizations correspond to LLVM bugs found during Alive-FP development.
+Type annotations have been added to speed verification, but may be safely
+removed.
+
+PR27151.opt is noteworthy because its validity depends on the interpretation 
+used. Alive uses the "undef" interpretation of fast-math flags by default,
+leading to a counter-example.
+
+	$ ./run.py tests/bugs/PR27151.opt 
+	----------                                                                                                  
+	Name: tests/bugs/PR27151.opt#1:simplify:813-2
+	Pre: C == 0.0
+	%y = fsub nnan ninf half C, %x
+	%z = fadd %y, %x
+	=>
+	%z = 0
+
+	ERROR: Mismatch in values for half %z                                                                       
+
+	Example:
+	half C  = +0.0
+	half %x = +oo
+	half %y = NaN
+	source: NaN
+	target: +0.0
+
+This can be explicitly requested with the option --translator smtundef.
+
+However, under the "poison" interpretation, the optimization is valid.
+
+    $ ./run.py --translator smtpoison tests/bugs/PR27151.opt   
+	----------                                                                                                  
+	Name: tests/bugs/PR27151.opt#1:simplify:813-2
+	Pre: C == 0.0
+	%y = fsub nnan ninf half C, %x
+	%z = fadd %y, %x
+	=>
+	%z = 0
+
+	Done: 1                                                                                                     
+	Optimization is correct
