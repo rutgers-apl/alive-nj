@@ -100,8 +100,8 @@ Pre: hasOneUse(%x)
 
 ; visitFRem
 
-Name: muldivrem:1500 ; PR26943 (lifejacket)
-%1 = select %A, 0, %Y ; symmetric
-%r = frem %X, %1
-=>
-%r = frem %X, %Y
+; Name: muldivrem:1500 ; PR26943 (lifejacket)
+; %1 = select %A, 0, %Y ; symmetric
+; %r = frem %X, %1
+; =>
+; %r = frem %X, %Y
