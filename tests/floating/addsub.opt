@@ -22,14 +22,14 @@ Name: addsub:1345
 %r = fsub %a, -C
 
 
-Name: addsub:1354 ; PR27153
-Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
-%x = sitofp %a to half
-%r = fadd %x, C
-=>
-C0 = fptosi(C)
-%y = add nsw %a, C0
-%r = sitofp %y
+; Name: addsub:1354 ; PR27153
+; Pre: sitofp(C0) == C && WillNotOverflowSignedAdd(%a, C0)
+; %x = sitofp %a to half
+; %r = fadd %x, C
+; =>
+; C0 = fptosi(C)
+; %y = add nsw %a, C0
+; %r = sitofp %y
 
 
 ; Pre: C1 == 0.0 && C2 == 0.0 && \
