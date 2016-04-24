@@ -177,16 +177,26 @@ def main():
     help='only print number of tested and unverified opts')
   parser.add_argument('--translator', action='store',
     default=config.translator,
-    choices=smtinterp.SMTTranslator.registry,
+    # choices=smtinterp.SMTTranslator.registry,
     help='(advanced) pick class for SMT translation')
   parser.add_argument('-r', '--rounding-mode', action='store',
     choices=rounding_modes,
     help='rounding mode for arithmetic')
+  parser.add_argument('--bench-dir', action='store',
+    help='generate SMT2 benchmarks in this directory')
+  parser.add_argument('--bench-threshold', action='store', type=float,
+    help='minimum solve time (s) needed to trigger benchmark generation')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
     help='file(s) containing Alive optimizations (stdin by default)')
 
   args = parser.parse_args()
+
+  if args.bench_dir:
+    config.bench_dir = args.bench_dir
+
+  if args.bench_threshold:
+    config.bench_threshold = args.bench_threshold
 
   if config.bench_dir:
     if not os.path.isdir(config.bench_dir):
