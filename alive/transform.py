@@ -4,7 +4,7 @@ General object representing transformations (optimizations).
 
 from .language import *
 from . import typing
-from . import pretty
+from .util import pretty
 from .util.dispatch import singledispatch
 import logging
 import collections

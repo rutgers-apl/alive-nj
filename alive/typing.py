@@ -3,7 +3,7 @@ Apply typing constraints to the IR.
 '''
 
 from .language import *
-from . import disjoint, pretty
+from .util import disjoint, pretty
 import logging, itertools
 import collections
 
