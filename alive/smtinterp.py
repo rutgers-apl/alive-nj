@@ -223,9 +223,13 @@ class BaseSMTTranslator():
     if attr in term.flags:
       return z3.BoolVal(True)
 
+    return self._get_attr_var(attr, term)
+
+  def _get_attr_var(self, attr, term):
     if attr in self.attrs[term]:
       return self.attrs[term][attr]
 
+    # TODO: pick name better
     b = self.fresh_bool()
     logger.debug('Creating attr var %s for %s:%s', b, term, attr)
     self.attrs[term][attr] = b
@@ -778,6 +782,21 @@ eval.register(HasNSWPred, BaseSMTTranslator, _has_attr('nsw'))
 eval.register(HasNSZPred, BaseSMTTranslator, _has_attr('nsz'))
 eval.register(HasNUWPred, BaseSMTTranslator, _has_attr('nuw'))
 eval.register(IsExactPred, BaseSMTTranslator, _has_attr('exact'))
+
+@eval.register(IsConstantPred, BaseSMTTranslator)
+def _(term, smt):
+  arg = term._args[0]
+  if isinstance(arg, Constant):
+    return z3.BoolVal(True)
+
+  if isinstance(arg, Instruction):
+    return z3.BoolVal(False)
+
+  assert isinstance(arg, Input)
+
+  # if this is in input, we can return true or false, but we
+  # need to do so consistently
+  return smt._get_attr_var('is_const', arg)
 
 eval.register(IntMinPred, BaseSMTTranslator,
   _handler(lambda x: x == 1 << (x.size()-1)))

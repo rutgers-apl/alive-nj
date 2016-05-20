@@ -943,6 +943,12 @@ class HasNUWPred(FunPred):
 
   type_constraints = _none
 
+class IsConstantPred(FunPred):
+  sig  = (Value,)
+  code = 'isConstant'
+
+  type_constraints = _none
+
 class IsExactPred(FunPred):
   sig  = (InexactBinaryOperator,)
   code = 'isExact'
