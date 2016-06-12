@@ -7,7 +7,7 @@ presented at PLDI 2015.
 [2]: http://www.cs.utah.edu/~regehr/papers/pldi15.pdf
 
 Alive-NJ is intended to facilitate experimentation with Alive semantics and
-extension of Alive into new areas. It is not recommended for serious usage.
+extension of Alive into new areas. 
 
 ## Requirements
 
