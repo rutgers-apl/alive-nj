@@ -314,8 +314,8 @@ class TypeConstraints(object):
       for lo,hi in self.ordering:
         if lo == v and hi in model and model[hi].width < wmax:
           wmax = model[hi].width
-        elif hi == v and lo in model and model[lo].width > wmin:
-          wmin = model[lo].width
+        elif hi == v and lo in model and model[lo].width >= wmin:
+          wmin = model[lo].width+1
         elif hi == v and isinstance(lo, int) and lo >= wmin:
           wmin = lo+1
 
