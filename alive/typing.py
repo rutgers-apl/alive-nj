@@ -225,7 +225,8 @@ class TypeConstraints(object):
     self.logger.debug('generating models')
     self.simplify_orderings()
     
-    numbers = [r for (r,con) in self.constraints.iteritems() if con == NUMBER]
+    numbers = [r for (r,con) in self.constraints.iteritems()
+      if con == NUMBER and r not in self.specifics]
     if numbers:
       logger.warning('NUMBER constraint(s) survived unification\n  %s',
         pretty.pformat(numbers, indent=2))
