@@ -57,8 +57,14 @@ class Transform(pretty.PrettyRepr):
 
     return t
 
+  def abstract_type_model(self):
+    if not hasattr(self, '_model'):
+      self._model = self.type_constraints().get_type_model()
+
+    return self._model
+
   def type_models(self):
-    return self.type_constraints().type_models()
+    return self.abstract_type_model().type_vectors()
 
   def constant_defs(self):
     """Generate shared constant terms from the target and precondition.
@@ -183,6 +189,7 @@ class Formatter(object):
 @singledispatch
 def format(term, fmt):
   """
+  format(term, fmt)
   Return Node formatted in Alive syntax.
 
   fmt must be a Formatter object, which handles operand references

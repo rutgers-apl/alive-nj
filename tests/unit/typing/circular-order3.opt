@@ -1,4 +1,4 @@
-; ERROR: Unsatisfiable type constraints
+; ERROR: Incompatible constraints for %z: circular
 %y = sext %x
 %z = sext %y
 =>

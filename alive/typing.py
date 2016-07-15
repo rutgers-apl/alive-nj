@@ -6,11 +6,26 @@ from .language import *
 from .util import disjoint, pretty
 import logging, itertools
 import collections
+import weakref
 
 logger = logging.getLogger(__name__)
 
 FIRST_CLASS, NUMBER, FLOAT, INT_PTR, PTR, INT, BOOL, Last = range(8)
 
+context = weakref.WeakKeyDictionary()
+  # Maps nodes to type ids
+  # Uses weak refs, to enable creating many typed terms without having to worry
+  # about garbage collection (useful when enumerating possible preconditions)
+  #
+  # Presently, nodes are stored by their hash (ie, by pointer). This means:
+  # 1. the same node cannot have two different type ids, so sharing nodes between
+  #    transformations is dangerous
+  # 2. any switch to structural equality for nodes will require changing how this
+  #    works (eg, log2(C) may have different types in different contexts, presently
+  #    they are different objects)
+  #
+  # It is possible to avoid using a global here by including context in the
+  # TypeModel, but this would possibly complicate things elsewhere.
 
 def most_specific(c1,c2):
   if c1 > c2:
@@ -176,7 +191,6 @@ class TypeConstraints(object):
           self.specifics[r],
           _constraint_name[self.constraints[r]]))
 
-
   def simplify_orderings(self):
     if self.logger.isEnabledFor(logging.DEBUG):
       self.logger.debug('simplifying ordering:\n  ' + 
@@ -202,10 +216,144 @@ class TypeConstraints(object):
     self.ordering = ords
     self.width_equalities = eqs
 
+  def get_type_model(self):
+    """Return an AbstractTypeModel expressing the constraints gathered so far,
+    and sets the type variable for each term.
+    """
+
+    self.simplify_orderings()
+    # TODO: this can be folded into the next loop
+
+    # find predecessors and lower bounds
+    lower_bounds = collections.defaultdict(list)
+    min_width = {}
+    for lo,hi in self.ordering:
+      if isinstance(lo, int):
+        min_width[hi] = max(lo, min_width.get(hi,0))
+      else:
+        lower_bounds[hi].append(lo)
+
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('get_type_model:\n  min_width: ' +
+        pretty.pformat(min_width, indent=13) +
+        '\n  lower_bounds: ' + pretty.pformat(lower_bounds, indent=16))
+
+    # recursively walk DAG
+    # TODO: handle all specific constraints first?
+    finished = {}
+    order = []
+    def visit(rep):
+      if rep in finished:
+        if finished[rep]:
+          return
+
+        # if rep is in finished, but we haven't set it to true, then
+        # we must have found a loop
+        raise Error('Incompatible constraints for {}: circular ordering'.format(
+          rep.name if hasattr(rep, 'name') else str(rep)
+          ))
+
+      finished[rep] = False
+      for p in lower_bounds[rep]:
+        visit(p)
+
+      order.append(rep)
+      finished[rep] = True
+
+    for r in self.sets.reps():
+      visit(r)
+
+    tyvars = dict(itertools.izip(order, itertools.count()))
+    if logger.isEnabledFor(logging.DEBUG):
+      logger.debug('get_type_model:\n  tyvars: ' +
+        pretty.pformat(tyvars, indent=10))
+
+    min_width = { tyvars[rep]: w for (rep,w) in min_width.iteritems() }
+    lower_bounds = { tyvars[rep]: tuple(tyvars[t] for t in ts)
+                      for (rep,ts) in lower_bounds.iteritems() if ts }
+
+    # recreate specific and constraint in terms of tyvars
+    specific = {}
+    constraint = []
+    for tyvar,rep in enumerate(order):
+      if rep in self.specifics:
+        specific[tyvar] = self.specifics[rep]
+        if not meets_constraint(self.constraints[rep], self.specifics[rep]):
+          raise Error('Incompatible constraints for {}: {} is not {}'.format(
+            rep.name if hasattr(rep, 'name') else str(r),
+            self.specifics[rep],
+            _constraint_name[self.constraints[rep]]))
+
+      constraint.append(self.constraints[rep])
+
+      for t in self.sets.subset(rep):
+        assert t not in context
+        context[t] = tyvar
+
+    # note equal widths
+    width_equality = {}
+    for (a,b) in self.width_equalities:
+      assert a != b
+      va = tyvars[a]
+      vb = tyvars[b]
+      if va > vb: va,vb = vb,va
+
+      if vb in width_equality:
+        width_equality[va] = width_equality[vb]
+
+      width_equality[vb] = va
+
+    return AbstractTypeModel(constraint, specific, min_width, lower_bounds,
+      width_equality)
+
+class AbstractTypeModel(object):
+  """Contains the constraints gathered during type checking.
+  """
+
+  pointer_width = 64
+    # in principle, this could be a parameter to the model, or even vary during
+    # enumeration, but right now pointer width doesn't affect anything
+
+  max_int = 65 # one more than the largest int type permitted
+  float_tys = (HalfType(), SingleType(), DoubleType())
+
+  def __init__(self, constraint, specific, min_width, lower_bounds, width_equality):
+    self.constraint = constraint
+    self.specific = specific
+    self.min_width = min_width
+    self.lower_bounds = lower_bounds
+    self.width_equality = width_equality
+    self.tyvars = len(constraint)
+
+  # TODO: we probably need some way to determine which types are larger/smaller than
+
+  @staticmethod
+  def int_types(min_width, max_width):
+    """Generate IntTypes in the range min_width to max_width-1.
+    """
+
+    if min_width <= 4 < max_width:
+      yield IntType(4)
+    if min_width <= 8 < max_width:
+      yield IntType(8)
+    for w in xrange(min_width, min(max_width, 4)):
+      yield IntType(w)
+    for w in xrange(max(min_width, 5), min(max_width, 8)):
+      yield IntType(w)
+    for w in xrange(max(min_width, 9), max_width):
+      yield IntType(w)
+
+  def floor(self, vid, vector):
+    if vid in self.lower_bounds:
+      floor = max(vector[v].width for v in self.lower_bounds[vid])
+    else:
+      floor = 0
+    floor = max(floor, self.min_width.get(vid, 0))
+    return floor
+
   def bits(self, ty):
-    """Return the size of the type in bits."""
-    # this is in the class in case we want to do something with pointers,
-    # but maybe it should be in model?
+    """Return the size of the type in bits.
+    """
 
     if isinstance(ty, IntType):
       return ty.width
@@ -216,153 +364,70 @@ class TypeConstraints(object):
       # true for all current floats: the sign bit and the implicit fraction
       # bit cancel out
     if isinstance(ty, PtrType):
-      return 64
+      return self.pointer_width
 
     assert False
 
 
-  def type_models(self):
-    self.logger.debug('generating models')
-    self.simplify_orderings()
-    
-    numbers = [r for (r,con) in self.constraints.iteritems()
-      if con == NUMBER and r not in self.specifics]
-    if numbers:
-      logger.warning('NUMBER constraint(s) survived unification\n  %s',
-        pretty.pformat(numbers, indent=2))
-
-    model = {}
-
-    # collect sets with fixed types
-    for r,ty in self.specifics.iteritems():
-      if r in self.constraints and not \
-          meets_constraint(self.constraints[r], ty):
-        raise Error('Incompatible constraints for {}: {} is not {}'.format(
-          r.name if hasattr(r, 'name') else str(r),
-          self.specifics[r],
-          _constraint_name[self.constraints[r]]))
-
-      model[r] = ty
-
-    for lo,hi in self.ordering:
-      if lo == hi:
-        raise Error('Incompatible constraints for {}: circular ordering'.format(
-          lo.name if hasattr(lo, 'name') else str(lo)))
-      if lo in model and hi in model and model[lo] >= model[hi]:
-        raise Error('Incompatible constraints for {} and {}: {} < {}'.format(
-          lo.name if hasattr(lo, 'name') else str(lo),
-          hi.name if hasattr(hi, 'name') else str(hi),
-          model[lo],
-          model[hi]))
-      if isinstance(lo, int) and hi in model and model[hi] <= lo:
-        raise Error('Incompatible constraints for {}: {} < {}'.format(
-          hi.name if hasattr(hi, 'name') else str(hi),
-          IntType(lo),
-          model[hi]))
-
-    for a,b in self.width_equalities:
-      if a in model and b in model and \
-          self.bits(model[a]) != self.bits(model[b]):
-        raise Error('Incompatible constraints for {} and {}'.format(
-          a.name if hasattr(a, 'name') else str(a),
-          b.name if hasattr(b, 'name') else str(b)))
-
-    vars = tuple(r for r in self.sets.reps() if r not in self.specifics)
-    if logger.isEnabledFor(logging.DEBUG):
-      self.logger.debug('variables:\n  ' + pretty.pformat(vars, indent=2))
-      self.logger.debug('initial model:\n  ' + pretty.pformat(model, indent=2))
-
-    return self._iter_models(0, vars, model)
-
-  float_tys = (HalfType(), SingleType(), DoubleType())
-
-  def _iter_models(self, n, vars, model):
-    if n == len(vars):
-      if self.logger.isEnabledFor(logging.DEBUG):
-        self.logger.debug('emitting model\n  ' + pretty.pformat(model, indent=2))
-
-      yield TypeModel(self.sets, dict(model))
+  # this could be done as a stack, instead of as nested generators
+  def _enum_vectors(self, vid, vector):
+    if vid >= self.tyvars:
+      yield tuple(vector)
       return
 
-    v = vars[n]
-    self.logger.debug('Enumerating %s', v)
+    if vid in self.specific:
+      # TODO: better to put an upper bound on variables less than a fixed type
+      if vector[vid] <= self.floor(vid, vector):
+        return
 
-    con = self.constraints[v]
+      # this check could be avoided if fixed types occurred before variables
+      if vid in self.width_equality and \
+          self.bits(vector[vid]) != self.bits(vector[self.width_equality[vid]]):
+        return
+
+      for v in self._enum_vectors(vid+1, vector):
+        yield v
+
+      return
+
+    con = self.constraint[vid]
     if con == FIRST_CLASS:
-      tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),), self.float_tys)
+      tys = itertools.chain(self.int_types(1, self.max_int), (PtrType(),), self.float_tys)
     elif con == NUMBER:
-      tys = itertools.chain(self._ints(1, self.widthlimit), self.float_tys)
+      tys = itertools.chain(self.int_types(1, self.max_int), self.float_tys)
     elif con == FLOAT:
-      tys = self.float_tys
-
-      for lo,hi in self.ordering:
-        if lo == v and hi in model:
-          tys = tuple(ty for ty in tys if ty < model[hi])
-        elif hi == v and lo in model:
-          tys = tuple(ty for ty in tys if ty > model[lo])
-        elif hi == v and isinstance(lo, int):
-          tys = tuple(ty for ty in tys if ty > lo)
-
+      tys = (t for t in self.float_tys if t > self.floor(vid, vector))
     elif con == INT_PTR:
-      tys = itertools.chain(self._ints(1, self.widthlimit), (PtrType(),))
-    elif con == PTR:
-      tys = (PtrType(),)
+      tys = itertools.chain(self.int_types(1, self.max_int), (PtrType(),))
     elif con == INT:
-      # this is the only case where we can have an ordering constraint
-      wmin = 1
-      wmax = self.widthlimit
-      for lo,hi in self.ordering:
-        if lo == v and hi in model and model[hi].width < wmax:
-          wmax = model[hi].width
-        elif hi == v and lo in model and model[lo].width >= wmin:
-          wmin = model[lo].width+1
-        elif hi == v and isinstance(lo, int) and lo >= wmin:
-          wmin = lo+1
-
-      self.logger.debug('Int range [%s,%s) for %s', wmin, wmax, v)
-      tys = self._ints(wmin,wmax)
-
+      floor = self.floor(vid, vector)
+      if isinstance(floor, IntType): floor = floor.width
+      tys = self.int_types(floor + 1, self.max_int)
     elif con == BOOL:
       tys = (IntType(1),)
     else:
       assert False
 
-    for (a,b) in self.width_equalities:
-      assert a != b
-      if a == v and b in model:
-        self.logger.debug('Constrain %s to %s', v, model[b])
-        tys = (ty for ty in tys if self.bits(ty) == self.bits(model[b]))
-      elif b == v and a in model:
-        self.logger.debug('Constrain %s to %s', v, model[a])
-        tys = (ty for ty in tys if self.bits(ty) == self.bits(model[a]))
+    if vid in self.width_equality:
+      bits = self.bits(vector[self.width_equality[vid]])
+      tys = (t for t in tys if self.bits(t) == bits)
+      # NOTE: this wastes a lot of effort, but it's only used for bitcast
+      # NOTE: this will permit bitcasting between equal types (eg. i64 -> i64)
 
-    for ty in tys:
-      model[v] = ty
-      for m in self._iter_models(n+1, vars, model):
-        yield m
+    for t in tys:
+      vector[vid] = t
+      for v in self._enum_vectors(vid+1, vector):
+        yield v
 
-  def _ints(self, wmin, wmax):
-    if wmin <= 4 < wmax:
-      yield IntType(4)
-    if wmin <= 8 < wmax:
-      yield IntType(8)
-    for w in xrange(wmin, min(wmax,4)):
-      yield IntType(w)
-    for w in xrange(max(wmin,5),min(wmax,8)):
-      yield IntType(w)
-    for w in xrange(max(wmin,9), wmax):
-      yield IntType(w)
+  def type_vectors(self):
+    """Generate type vectors consistent with this model."""
 
-class TypeModel(object):
-  '''Map terms to types.
-  '''
+    vector = [None] * self.tyvars
 
-  def __init__(self, sets, model):
-    self.sets = sets
-    self.model = model
+    for vid,ty in self.specific.iteritems():
+      vector[vid] = ty
 
-  def __getitem__(self, key):
-    return self.model[self.sets.rep(key)]
+    return self._enum_vectors(0, vector)
 
 class Error(Exception):
   pass

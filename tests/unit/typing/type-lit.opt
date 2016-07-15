@@ -1,4 +1,4 @@
-; ERROR: Incompatible constraints for %a
+; ERROR: Unsatisfiable type constraints
 %a = add i8 %b, 1024
 =>
 %a = undef

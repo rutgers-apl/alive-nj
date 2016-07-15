@@ -1,4 +1,4 @@
-; ERROR: Incompatible constraints for %a and %x
+; ERROR: Unsatisfiable type constraints
 %x = zext i8 %a to i4
 =>
 %x = undef

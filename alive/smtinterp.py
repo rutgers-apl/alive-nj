@@ -5,6 +5,7 @@ Translate expressions into SMT via Z3
 from .language import *
 from .z3util import *
 from .util.dispatch import doubledispatch
+from . import typing
 from functools import partial
 import z3, operator, logging
 import types
@@ -94,7 +95,7 @@ class BaseSMTTranslator():
     self.qvars += qvars
 
   def type(self, term):
-    return self.types[term]
+    return self.types[typing.context[term]]
 
   def fresh_bool(self):
     self.fresh += 1

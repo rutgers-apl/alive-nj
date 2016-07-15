@@ -4,6 +4,7 @@ Refinement checking for optimizations.
 
 from . import config
 from . import smtinterp
+from . import typing
 import z3
 import glob
 import logging
@@ -136,7 +137,7 @@ class CounterExampleError(Error):
 
   def write(self):
     print 'ERROR:', self.cause_str[self.cause],
-    print 'for', self.types[self.src], self.src.name
+    print 'for', self.types[typing.context[self.src]], self.src.name
     print
 
     smt = self.trans(self.types)
@@ -157,7 +158,7 @@ class CounterExampleError(Error):
     name_width = 1
     rows = []
     for v in vars:
-      ty = str(self.types[v])
+      ty = str(self.types[typing.context[v]])
       name = v.name
       rows.append((ty,name, format_z3val(self.model.evaluate(smt.eval(v), True))))
         # it shouldn't matter that these will get new qvars,
