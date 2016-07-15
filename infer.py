@@ -577,14 +577,14 @@ def alt_find_conflict_set(vectors):
   return chosen
 
 
-def alt_infer_precondition_by_examples(symbols, type_model, goods, bads
+def alt_infer_precondition_by_examples(symbols, type_model, goods, bads,
     features=None):
   log = logging.getLogger('infer.pie')
   if features is None:
     features = []
 
   feature_vectors = {(): (goods, bads)}
-  for f in features"
+  for f in features:
     feature_vectors = extend_feature_vectors_with_ast(feature_vectors, f, symbols, type_model)
     if log.isEnabledFor(logging.DEBUG):
       log.debug('Feature Vectors\n  ' +
