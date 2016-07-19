@@ -800,8 +800,7 @@ class AndPred(Predicate):
     return self.clauses
 
   def type_constraints(self, tcs):
-    for p in self.clauses:
-      p.type_constraints(tcs)
+    return
 
 TruePred = AndPred()
 
@@ -818,8 +817,7 @@ class OrPred(Predicate):
     return self.clauses
 
   def type_constraints(self, tcs):
-    for p in self.clauses:
-      p.type_constraints(tcs)
+    return
 
 class NotPred(Predicate):
   __slots__ = ('p',)
@@ -831,7 +829,7 @@ class NotPred(Predicate):
     return (self.p,)
 
   def type_constraints(self, tcs):
-    self.p.type_constraints(tcs)
+    return
 
 class Comparison(Predicate):
   __slots__ = ('op','x','y')

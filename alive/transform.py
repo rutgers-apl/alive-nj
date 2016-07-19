@@ -37,22 +37,24 @@ class Transform(pretty.PrettyRepr):
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)
+
     t = typing.TypeConstraints()
+    seen = set()
 
     # find type variables from the source
-    t(self.src)
-#     try:
-#       t.type_models().next()
-#       # FIXME: this triggers warnings for variables constrained to NUMBER
-#       # which will later be constrained by the target
-#     except StopIteration:
-#       raise typing.Error('Unsatisfiable type constraints in source')
+    for term in subterms(self.src, seen):
+      term.type_constraints(t)
 
     src_reps = tuple(t.sets.reps())
 
-    t.eq_types(self.src, self.tgt)
+    for term in subterms(self.tgt, seen):
+      term.type_constraints(t)
+
     if self.pre:
-      self.pre.type_constraints(t)
+      for term in subterms(self.pre, seen):
+        term.type_constraints(t)
+
+    t.eq_types(self.src, self.tgt)
 
     reps = set(t.sets.reps())
     for r in src_reps:
@@ -89,11 +91,9 @@ class Transform(pretty.PrettyRepr):
     try:
       V.eq_types(self.src, self.tgt)
 
-      for t in itertools.chain(subterms(self.src, seen), subterms(self.tgt, seen)):
+      for t in self.subterms():
+        logger.debug('checking %s', t)
         t.type_constraints(V)
-
-      if self.pre is not None:
-        self.pre.type_constraints(V)
 
       return True
 

@@ -94,7 +94,6 @@ class TypeConstraints(object):
     assert isinstance(term, Value)
     self.logger.debug('adding term %s', term)
     self.sets.add_key(term)
-    term.type_constraints(self)
 
   def _merge(self, t1, t2):
     self.logger.debug('unifying %s and %s', t1, t2)
