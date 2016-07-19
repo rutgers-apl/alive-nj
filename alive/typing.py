@@ -429,5 +429,78 @@ class AbstractTypeModel(object):
 
     return self._enum_vectors(0, vector)
 
+
+class Validator(object):
+  """Compare type constraints for a term against a supplied type vector.
+
+  Usage:
+    given an AbstractTypeModel m, a type vector v, and a term t,
+
+    > t.type_constraints(Validator(m,v))
+
+    will return None for success and raise an Error if the term's constraints
+    are not met.
+  """
+
+  def __init__(self, type_model, type_vector):
+    self.type_model = type_model
+      # just needed for bits in width_equal
+    self.type_vector = type_vector
+
+  def type(self, term):
+    return self.type_vector[context[term]]
+
+  def eq_types(self, *terms):
+    it = iter(terms)
+    t1 = it.next()
+    ty = self.type(t1)
+
+    for t in it:
+      if self.type(t) != ty:
+        raise Error
+
+  def specific(self, term, ty):
+    if ty is not None and self.type(term) != ty:
+      raise Error
+
+  def integer(self, term):
+    if not isinstance(self.type(term), IntType):
+      raise Error
+
+  def bool(self, term):
+    if self.type(term) != IntType(1):
+      raise Error
+
+  def pointer(self, term):
+    if not isinstance(self.type(term), PtrType):
+      raise Error
+
+  def int_ptr_vec(self, term):
+    if not isinstance(self.type(term), (IntType, PtrType)):
+      raise Error
+
+  def float(self, term):
+    if not isinstance(self.type(term), FloatType):
+      raise Error
+
+  def first_class(self, term):
+    if not isinstance(self.type(term), (IntType, FloatType, PtrType)):
+      raise Error
+
+  def number(self, term):
+    if not isinstance(self.type(term), (IntType, FloatType)):
+      raise Error
+
+  def width_order(self, lo, hi):
+    if isinstance(lo, Value):
+      lo = self.type(lo)
+
+    if lo >= self.type(hi):
+      raise Error
+
+  def width_equal(self, a, b):
+    if self.type_model.bits(self.type(a)) != self.type_model.bits(self.type(b)):
+      raise Error
+
 class Error(Exception):
   pass

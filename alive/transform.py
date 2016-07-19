@@ -8,6 +8,7 @@ from .util import pretty
 from .util.dispatch import singledispatch
 import logging
 import collections
+import itertools
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,17 @@ class Transform(pretty.PrettyRepr):
   def pretty(self):
     return pretty.pfun(type(self).__name__,
       (self.src, self.tgt, self.pre, self.name))
+
+  def subterms(self):
+    """Generate all terms in the transform, without repeats.
+    """
+    seen = set()
+
+    return itertools.chain(
+      subterms(self.src, seen),
+      subterms(self.tgt, seen),
+      () if self.pre is None else subterms(self.pre, seen)
+    )
 
   def type_constraints(self):
     logger.debug('%s: Gathering type constraints', self.name)
@@ -65,6 +77,28 @@ class Transform(pretty.PrettyRepr):
 
   def type_models(self):
     return self.abstract_type_model().type_vectors()
+
+  def validate_model(self, type_vector):
+    """Return whether the type vector meets this opt's constraints.
+    """
+
+    model = self.abstract_type_model()
+    V = typing.Validator(model, type_vector)
+    seen = set()
+
+    try:
+      V.eq_types(self.src, self.tgt)
+
+      for t in itertools.chain(subterms(self.src, seen), subterms(self.tgt, seen)):
+        t.type_constraints(V)
+
+      if self.pre is not None:
+        self.pre.type_constraints(V)
+
+      return True
+
+    except typing.Error:
+      return False
 
   def constant_defs(self):
     """Generate shared constant terms from the target and precondition.
