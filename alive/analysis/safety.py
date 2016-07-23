@@ -1,11 +1,11 @@
-from alive import language as L
-from alive import smtinterp
-from alive.z3util import mk_and, mk_or
+from .. import language as L
+from .. import smtinterp
+from ..z3util import mk_and, mk_or
 import z3
 import operator
 import logging
 
-logger = logging.getLogger('safety')
+logger = logging.getLogger(__name__)
 
 def mk_implies(premises, consequents):
   if not consequents:
@@ -75,7 +75,7 @@ smtinterp.eval.register(L.AShrCnxp, Translator,
   binop(operator.rshift, lambda x,y: [z3.ULT(y, y.size())]))
 
 smtinterp.eval.register(L.LShrCnxp, Translator,
-  smtinterp.binop(z3.LShR, lambda x,y: [z3.ULT(y, y.size())]))
+  binop(z3.LShR, lambda x,y: [z3.ULT(y, y.size())]))
 
 @smtinterp.eval.register(L.LShrFunCnxp, Translator)
 def _(term, smt):
