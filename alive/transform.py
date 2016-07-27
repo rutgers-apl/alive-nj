@@ -45,29 +45,45 @@ class Transform(pretty.PrettyRepr):
     for term in subterms(self.src, seen):
       term.type_constraints(t)
 
+    # note the type variables fixed by the source
     src_reps = tuple(t.sets.reps())
 
-    for term in subterms(self.tgt, seen):
-      term.type_constraints(t)
-
+    defaultable = []
     if self.pre:
       for term in subterms(self.pre, seen):
         term.type_constraints(t)
 
+        # note the immediate arguments to Comparisons and predicates,
+        # in case they need to be defaulted later
+        if isinstance(term, (Comparison, FunPred)):
+          defaultable.extend(term.args())
+
+    for term in subterms(self.tgt, seen):
+      term.type_constraints(t)
+
     t.eq_types(self.src, self.tgt)
 
-    reps = set(t.sets.reps())
+    # find any type variables not unified with a variable from the source
+    # (ie. which are newly introduced by the target or precondition)
+    reps = set(r for r in t.sets.reps()
+      if r not in t.specifics and t.constraints[r] != typing.BOOL)
     for r in src_reps:
       reps.discard(t.sets.rep(r))
 
-    # TODO: warning for defaulted terms
-    # FIXME: defaulted terms in the target are almost certainly bad
-    for r in reps:
-      if t.constraints.get(r) == typing.BOOL: continue
+    # if any of the new variables are defaultable, then default them
+    if reps:
+      for term in defaultable:
+        r = t.sets.rep(term)
+        if r in reps:
+          t.default(r)
+          reps.discard(r)
 
-      logger.debug('%s: Defaulting term %r', self.name, r)
-      t.specific(r, IntType(64))
-      # move this into TypeConstraints?
+    # if any new type variables cannot be defaulted, then the transformation
+    # is ambiguously typed
+    if reps:
+      fmt = Formatter()
+      raise typing.Error('Ambiguous type for ' + ', '.join(
+          fmt.operand(term) for term in reps))
 
     return t
 
@@ -213,10 +229,8 @@ class Formatter(object):
   def operand(self, term, ty = None):
     ty = str(ty) + ' ' if ty else ''
 
-    if term in self.ids:
+    if isinstance(term, Instruction):
       return ty + self.name(term)
-
-    assert not isinstance(term, Instruction)
 
     return ty + format(term, self)
 

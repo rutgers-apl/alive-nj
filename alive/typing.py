@@ -27,6 +27,10 @@ context = weakref.WeakKeyDictionary()
   # It is possible to avoid using a global here by including context in the
   # TypeModel, but this would possibly complicate things elsewhere.
 
+# Use this type for comparisons and predicates with ambiguously-typed arguments
+predicate_default = IntType(64)
+
+
 def most_specific(c1,c2):
   if c1 > c2:
     c1,c2 = c2,c1
@@ -114,6 +118,8 @@ class TypeConstraints(object):
       self.sets.unify(t1, t2, self._merge)
 
 
+  def default(self, term):
+    self.specific(term, predicate_default)
 
   def specific(self, term, ty):
     self.ensure(term)
