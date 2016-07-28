@@ -1,4 +1,5 @@
 from . import enumerator
+from .. import language as L
 from .. import typing
 from .. import smtinterp
 from ..analysis import safety
@@ -39,11 +40,11 @@ def test_feature(pred, test_case, cache):
   return z3.is_true(e)
 
 # symbols, type_model just get passed through to the enumerator
-def learn_feature(symbols, type_model, good, bad):
+def learn_feature(config, good, bad):
   log = logger.getChild('learn_feature')
   for size in itertools.count(3):
     log.info('Checking size %s', size)
-    for pred in enumerator.predicates(size, symbols, type_model):
+    for pred in enumerator.predicates(size, config):
       log.debug('Checking %s', pred)
 
       cache = {}
@@ -197,7 +198,7 @@ def mk_OrPred(clauses):
   return L.OrPred(*clauses)
 
 
-def infer_precondition_by_examples(symbols, type_model, goods, bads,
+def infer_precondition_by_examples(config, goods, bads,
     features=None):
   """Synthesize a precondition which accepts the good examples and
   rejects the bad examples.
@@ -228,7 +229,7 @@ def infer_precondition_by_examples(symbols, type_model, goods, bads,
     if conflict is None:
       break
 
-    f, cache = learn_feature(symbols, type_model, conflict[0], conflict[1])
+    f, cache = learn_feature(config, conflict[0], conflict[1])
     log.info('Feature %s: %s', len(features), f)
 
     features.append(f)
@@ -359,9 +360,6 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     log.debug('%s counter-examples', len(solver_bads))
 
-    if not solver_bads:
-      continue
-
     bads.extend(TestCase(type_vector, tc) for tc in solver_bads)
 
     if num_good > 0:
@@ -401,16 +399,21 @@ def infer_precondition(opt,
       random_cases, solver_good, solver_bad)
 
   type_model = opt.abstract_type_model()
-  type_vectors = list(itertools.islice(type_model.type_vectors(), 2))
+  type_vectors = list(itertools.islice(type_model.type_vectors(), 4))
     # FIXME: configure number of inital vectors somehow
 
   symbols = []
   inputs = []
+  reps = [None] * type_model.tyvars
   for t in L.subterms(opt.src):
+    reps[typing.context[t]] = t
     if isinstance(t, L.Symbol):
       symbols.append(t)
     elif isinstance(t, L.Input):
       inputs.append(t)
+
+  reps = [r for r in reps if r is not None]
+  assert all(isinstance(t, L.Value) for t in reps)
 
   goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
     random_cases, solver_good, solver_bad)
@@ -420,9 +423,10 @@ def infer_precondition(opt,
   valid = not bads
   pre = None
 
+  config = enumerator.Config(symbols, reps, type_model)
+
   while not valid:
-    pre = infer_precondition_by_examples(symbols, type_model, goods, bads,
-      features)
+    pre = infer_precondition_by_examples(config, goods, bads, features)
 
     if log.isEnabledFor(logging.INFO):
       log.info('Inferred precondition:\n  ' + pformat(pre, indent=2))
@@ -433,7 +437,7 @@ def infer_precondition(opt,
       smt = safety.Translator(type_vector)
 
       tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
-      
+
       log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
         tgt_safe, premises, consequent)
 
@@ -463,22 +467,3 @@ def infer_precondition(opt,
         break
 
   return pre
-
-from .. import language as L
-
-C = L.Symbol('C')
-typing.context[C] = 0
-
-v1 = (L.IntType(4),)
-v2 = (L.IntType(8),)
-
-goods = [
-  TestCase(v1, ((z3.BitVec('C',4), z3.BitVecVal(1, 4)),)),
-  TestCase(v1, ((z3.BitVec('C',4), z3.BitVecVal(7, 4)),)),
-  TestCase(v2, ((z3.BitVec('C',8), z3.BitVecVal(127, 8)),))
-  ]
-
-bads = [
-  TestCase(v1, ((z3.BitVec('C',4), z3.BitVecVal(0,4)),)),
-  TestCase(v2, ((z3.BitVec('C',8), z3.BitVecVal(-1,8)),)),
-  ]
