@@ -87,10 +87,11 @@ class TypeConstraints(object):
     self.ordering = set() # pairs (x,y) where width(x) < width(y)
     self.width_equalities = set() # pairs (x,y) where width(x) == width(y)
     self.widthlimit = maxwidth+1
+    self.default_rep = None
 
   def __call__(self, term):
     self.ensure(term)
-  
+
   def ensure(self, term):
     if term in self.sets:
       return
@@ -108,6 +109,9 @@ class TypeConstraints(object):
     if t2 in self.constraints:
       self.constrain(t1, self.constraints.pop(t2))
 
+    if t2 is self.default_rep:
+      self.default_rep = t1
+
   def eq_types(self, *terms):
     for t in terms:
       self.ensure(t)
@@ -117,9 +121,15 @@ class TypeConstraints(object):
     for t2 in it:
       self.sets.unify(t1, t2, self._merge)
 
-
   def default(self, term):
-    self.specific(term, predicate_default)
+    if self.default_rep is None:
+      self.ensure(term)
+      r = self.sets.rep(term)
+      self.specific(r, predicate_default)
+      self.constrain(term, INT)
+      self.default_rep = r
+    else:
+      self.eq_types(term, self.default_rep)
 
   def specific(self, term, ty):
     self.ensure(term)
@@ -308,8 +318,26 @@ class TypeConstraints(object):
 
       width_equality[vb] = va
 
+    # set up the default type
+    if self.default_rep is None:
+      default_id = len(constraint)
+      constraint.append(INT)
+      specific[default_id] = predicate_default
+    else:
+      default_id = tyvars[self.default_rep]
+
+    # NOTE: Ensuring the model includes a default type allows precondition
+    # inference to test things like width(%x) > 1, at the cost of making the
+    # model slightly bigger and type vector generation slightly slower. Other
+    # possible designs include:
+    # - Allowing mutation in the AbstractTypeModel, so that a default can be
+    #   added if necessary
+    # - A flag value in 'context' indicating a default type. This complicates
+    #   SMT translation and gets convoluted to handle when generating the
+    #   AbstractTypeModel
+
     return AbstractTypeModel(constraint, specific, min_width, lower_bounds,
-      width_equality)
+      width_equality, default_id)
 
 class AbstractTypeModel(object):
   """Contains the constraints gathered during type checking.
@@ -322,12 +350,14 @@ class AbstractTypeModel(object):
   max_int = 65 # one more than the largest int type permitted
   float_tys = (HalfType(), SingleType(), DoubleType())
 
-  def __init__(self, constraint, specific, min_width, lower_bounds, width_equality):
+  def __init__(self, constraint, specific, min_width, lower_bounds,
+      width_equality, default_id):
     self.constraint = constraint
     self.specific = specific
     self.min_width = min_width
     self.lower_bounds = lower_bounds
     self.width_equality = width_equality
+    self.default_id = default_id
     self.tyvars = len(constraint)
 
   # TODO: we probably need some way to determine which types are larger/smaller than
