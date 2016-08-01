@@ -39,8 +39,7 @@ def test_feature(pred, test_case, cache):
   assert z3.is_bool(e)
   return z3.is_true(e)
 
-# symbols, type_model just get passed through to the enumerator
-def learn_feature(config, good, bad):
+def learn_feature_1(config, good, bad):
   log = logger.getChild('learn_feature')
   for size in itertools.count(3):
     log.info('Checking size %s', size)
@@ -48,9 +47,40 @@ def learn_feature(config, good, bad):
       log.debug('Checking %s', pred)
 
       cache = {}
-      if all(test_feature(pred, g, cache) for g in good) and \
-          all(not test_feature(pred, b, cache) for b in bad):
+      good_accept = sum(1 for g in good if test_feature(pred, g, cache))
+      bad_accept  = sum(1 for b in bad if test_feature(pred, b, cache))
+
+      log.debug('Accepted: %s good, %s bad', good_accept, bad_accept)
+
+      if (good_accept == len(good) and bad_accept == 0) or \
+          (good_accept == 0 and bad_accept == len(bad)):
         return pred, cache
+#       if all(test_feature(pred, g, cache) for g in good) and \
+#           all(not test_feature(pred, b, cache) for b in bad):
+#         return pred, cache
+
+def learn_feature(config, good, bad):
+  log = logger.getChild('learn_feature')
+  threshold = min(CONFLICT_SET_CUTOFF, len(good)+len(bad))
+  for size in itertools.count(3):
+    log.info('Checking size %s', size)
+    for pred in enumerator.predicates(size, config):
+      log.debug('Checking %s', pred)
+
+      cache = {}
+      good_accept = sum(1 for g in good if test_feature(pred, g, cache))
+      good_reject = len(good) - good_accept
+      bad_accept  = sum(1 for b in bad if test_feature(pred, b, cache))
+      bad_reject  = len(bad) - bad_accept
+
+      log.debug('Accepted: %s good, %s bad', good_accept, bad_accept)
+
+      if (good_accept + bad_reject >= threshold and
+            min(good_accept, bad_reject) > 0) or \
+          (good_reject + bad_accept >= threshold and
+            min(good_reject, bad_accept) > 0):
+        return pred, cache
+
 
 def find_largest_conflict_set(vectors):
   largest = 0
@@ -63,6 +93,11 @@ def find_largest_conflict_set(vectors):
     if size > largest:
       largest = size
       chosen = (g,b)
+
+  log = logger.getChild('find_largest_conflict_set')
+  if log.isEnabledFor(logging.DEBUG):
+    log.debug('\n  good: ' + pformat(g, indent=8) +
+              '\n  bad:  ' + pformat(b, indent=8))
 
   return chosen
 
@@ -81,14 +116,19 @@ def sample_largest_conflict_set(vectors):
       assert len(g) + len(b) == CONFLICT_SET_CUTOFF
       chosen = (g,b)
 
+    log = logger.getChild('sample_largest_conflict_set')
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('\n  good: ' + pformat(g, indent=8) +
+                '\n  bad:  ' + pformat(b, indent=8))
+
   return chosen
 
-find_conflict_set = sample_largest_conflict_set
+find_conflict_set = find_largest_conflict_set
 
 def partition(feature, cache, cases):
   sats = []
   unsats = []
-  
+
   for tc in cases:
     if test_feature(feature, tc, cache):
       sats.append(tc)
@@ -131,7 +171,7 @@ def learn_boolean(feature_count, goods, bads):
 
   lits = range(-feature_count, feature_count)
   k = 0
-  
+
   # generate clauses until all bad vectors are excluded
   while len(excludes) < len(bads):
     k += 1
@@ -174,7 +214,7 @@ def learn_boolean(feature_count, goods, bads):
       for v in excluded_by[c]:
         for xc in excludes.pop(v):
           if xc == c: continue
-          
+
           #log.debug('deleting vector %s from clause %s', v, xc)
           exc = excluded_by[xc]
           excluding[len(exc)].remove(xc)
@@ -187,14 +227,14 @@ def mk_AndPred(clauses):
   clauses = tuple(clauses)
   if len(clauses) == 1:
     return clauses[0]
-  
+
   return L.AndPred(*clauses)
 
 def mk_OrPred(clauses):
   clauses = tuple(clauses)
   if len(clauses) == 1:
     return clauses[0]
-  
+
   return L.OrPred(*clauses)
 
 
@@ -202,7 +242,7 @@ def infer_precondition_by_examples(config, goods, bads,
     features=None):
   """Synthesize a precondition which accepts the good examples and
   rejects the bad examples.
-  
+
   features is None or an initial list of features; additional features
   will be appended to this list.
   """
@@ -233,7 +273,7 @@ def infer_precondition_by_examples(config, goods, bads,
     log.info('Feature %s: %s', len(features), f)
 
     features.append(f)
-    
+
     feature_vectors = extend_feature_vectors(feature_vectors, f, cache)
 
     if log.isEnabledFor(logging.DEBUG):
@@ -243,7 +283,7 @@ def infer_precondition_by_examples(config, goods, bads,
 
   good_vectors = []
   bad_vectors = []
-  
+
   for vector, g, b in feature_vectors:
     assert not g or not b
     if g:
@@ -318,7 +358,7 @@ def get_models(expr, vars):
 def interpret_opt(smt, opt):
   """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
   """
-  
+
   sv,sd,sp,sq = smt(opt.src)
   if sq:
     raise Exception('quantified variables in opt {!r}'.format(opt.name))
@@ -335,13 +375,13 @@ def interpret_opt(smt, opt):
 
   return ts, sd, mk_and(td)
 
-def make_test_cases(opt, symbols, inputs, type_vectors, 
+def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad):
   log = logger.getChild('make_test_cases')
 
   goods = []
   bads = []
-  
+
   assert num_bad > 0
   num_random = max(0, num_random)
 
@@ -364,21 +404,21 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
-    
+
       query = mk_and(premises + [z3.ForAll(input_smts, e)])
       solver_goods = list(
         itertools.islice(get_models(query, symbol_smts), num_good))
-      
+
       log.debug('%s pro-examples', len(solver_goods))
-      
+
       goods.extend(TestCase(type_vector, tc) for tc in solver_goods)
-  
+
     filter = mk_and(premises) if premises else None
 
     r_goods, r_bads = random_test_cases(num_random, e, symbols, type_vector, filter)
-    
+
     log.debug('randoms: %s good, %s bad', len(r_goods), len(r_bads))
-    
+
     goods.extend(r_goods)
     bads.extend(r_bads)
 
@@ -417,9 +457,9 @@ def infer_precondition(opt,
 
   goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
     random_cases, solver_good, solver_bad)
-  
+
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
-  
+
   valid = not bads
   pre = None
 
@@ -460,10 +500,35 @@ def infer_precondition(opt,
         get_models(z3.Not(e), symbol_smts), solver_bad))
 
       log.info('counter-examples: %s', len(counter_examples))
-      
+
       if counter_examples:
         valid = False
         bads.extend(TestCase(type_vector, tc) for tc in counter_examples)
         break
 
   return pre
+
+def main():
+  import argparse, sys, logging.config
+  from alive import config, transform
+  from alive.main import read_opt_files
+  logging.config.dictConfig(config.logs)
+
+  parser = argparse.ArgumentParser()
+  parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
+    default=[sys.stdin])
+
+  args = parser.parse_args()
+
+  for opt in read_opt_files(args.file):
+    print '-----'
+    print opt.format()
+
+    pre = infer_precondition(opt)
+
+    opt.pre = pre
+    print
+    print opt.format()
+
+if __name__ == '__main__':
+  main()

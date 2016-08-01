@@ -16,7 +16,7 @@ unops = L.UnaryCnxp.codes.values()
 def expressions(size, tyvar, config):
   """Generate pairs (expr, bool) containing expressions of a particular size
   using the given symbols.
-  
+
   The bool is True if the expression contains a symbol.
   """
 
@@ -27,14 +27,15 @@ def expressions(size, tyvar, config):
     for s in config.symbols:
       if typing.context[s] == tyvar:
         yield s, True
+
+    for r in config.type_reps:
+      yield set_type(L.WidthCnxp(r), tyvar), tyvar == config.model.default_id
     return
 
   if size == 2:
     yield set_type(L.Literal(0), tyvar), False
     yield set_type(L.Literal(1), tyvar), False
     yield set_type(L.Literal(-1), tyvar), False
-    for r in config.type_reps:
-      yield set_type(L.WidthCnxp(r), tyvar), tyvar == config.model.default_id
 
   size -= 1
   for lsize in xrange(1,size):
@@ -50,7 +51,7 @@ def expressions(size, tyvar, config):
 
   # TODO: functions
 
-def positive_predicates(size, config):
+def predicates(size, config):
   tyvars = { typing.context[s] for s in config.symbols }
   tyvars.add(config.model.default_id)
 
@@ -73,8 +74,3 @@ def positive_predicates(size, config):
       yield L.IntMinPred(e)
       yield L.Power2Pred(e)
       yield L.Power2OrZPred(e)
-
-def predicates(size, config):
-  return itertools.chain(
-    positive_predicates(size, config),
-    itertools.imap(L.NotPred, positive_predicates(size-1, config)))
