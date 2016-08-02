@@ -63,7 +63,7 @@ def predicates(size, config):
           if not (s1 or s2): continue
 
           # TODO: avoid ult if tyvar is floating
-          for cmp in ['eq', 'slt', 'ult']: # sufficient?
+          for cmp in ['eq', 'ult', 'slt', 'ugt', 'sgt']: # sufficient?
             yield L.Comparison(cmp, l, r)
 
   # enumerate unary predicates
