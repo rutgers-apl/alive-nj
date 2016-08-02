@@ -47,11 +47,11 @@ def binop(op, safe):
   def _(term, smt):
     x = smt.eval(term.x)
     y = smt.eval(term.y)
-    
+
     smt.add_safe(safe(x,y))
-    
+
     return op(x,y)
-  
+
   return _
 
 smtinterp.eval.register(L.SDivCnxp, Translator,
@@ -89,12 +89,12 @@ def _(term, smt):
 @smtinterp.eval.register(L.AndPred, Translator)
 def _(term, smt):
   context = []
-  
+
   for c in term.clauses:
     p, safe = smt.eval_with_safe(c)
     smt.add_safe(mk_implies(context, safe))
     context.append(p)
-  
+
   return mk_and(context)
 
 @smtinterp.eval.register(L.OrPred, Translator)
@@ -103,7 +103,7 @@ def _(term, smt):
 
   for c in term.clauses:
     p, safe = smt.eval_with_safe(c)
-    smt.add_safe(mk_implies(context, safe))
+    smt.add_safe(mk_implies(map(z3.Not, context), safe))
     context.append(p)
 
   return mk_or(context)
@@ -116,7 +116,7 @@ def check_safety(opt, type_model=None):
   logger.info('Checking safety of opt %r', opt.name)
 
   smt = Translator(type_model)
-  
+
   if opt.pre:
     pb,pd,_,_ = smt(opt.pre)
     pd.append(pb)
@@ -147,7 +147,7 @@ def check_safety(opt, type_model=None):
 
   model  = s.model()
   logger.info('Found counterexample: %s', model)
-  
+
   s.add(sd)
   s.add(sp)
   logger.debug('Second check: %s', s)
