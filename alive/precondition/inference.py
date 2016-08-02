@@ -95,9 +95,9 @@ def find_largest_conflict_set(vectors):
       chosen = (g,b)
 
   log = logger.getChild('find_largest_conflict_set')
-  if log.isEnabledFor(logging.DEBUG):
-    log.debug('\n  good: ' + pformat(g, indent=8) +
-              '\n  bad:  ' + pformat(b, indent=8))
+  if chosen and log.isEnabledFor(logging.DEBUG):
+    log.debug('\n  good: ' + pformat(chosen[0], indent=8) +
+              '\n  bad:  ' + pformat(chosen[1], indent=8))
 
   return chosen
 
@@ -300,7 +300,7 @@ def infer_precondition_by_examples(config, goods, bads,
 
   return pre
 
-def random_test_cases(num, expr, symbols, type_vector, filter=None):
+def random_test_cases(num, expr, symbols, type_vector, skip, filter=None):
   smt = smtinterp.SMTPoison(type_vector)
 
   symbol_types = [type_vector[typing.context[t]] for t in symbols]
@@ -310,10 +310,21 @@ def random_test_cases(num, expr, symbols, type_vector, filter=None):
   bads = []
 
   for _ in xrange(num):
-    tc_vals = (z3.BitVecVal(random.randrange(0, 2**ty.width), ty.width)
-      for ty in symbol_types)
+    tc_vals = tuple(random.randrange(0, 2**ty.width) for ty in symbol_types)
 
-    tc = TestCase(type_vector, tuple(itertools.izip(symbol_smts, tc_vals)))
+    if tc_vals in skip:
+      continue
+
+    skip.add(tc_vals)
+
+    tc = TestCase(type_vector,
+      tuple(itertools.imap(lambda s,v,ty: (s, z3.BitVecVal(v, ty.width)),
+        symbol_smts, tc_vals, symbol_types)))
+
+#     tc_vals = (z3.BitVecVal(random.randrange(0, 2**ty.width), ty.width)
+#       for ty in symbol_types)
+#
+#     tc = TestCase(type_vector, tuple(itertools.izip(symbol_smts, tc_vals)))
 
     if filter:
       s = z3.Solver()
@@ -375,6 +386,19 @@ def interpret_opt(smt, opt):
 
   return ts, sd, mk_and(td)
 
+def get_corner_cases(symbols, type_vector):
+  def corners(symbol):
+    ty = type_vector[typing.context[symbol]]
+
+    if ty == L.IntType(1):
+      return [0,1]
+    elif isinstance(ty, L.IntType):
+      return [0,1,2**ty.width-1,2**(ty.width-1)]
+    else:
+      return []
+
+  return list(itertools.product(*map(corners, symbols)))
+
 def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad):
   log = logger.getChild('make_test_cases')
@@ -402,6 +426,9 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     bads.extend(TestCase(type_vector, tc) for tc in solver_bads)
 
+    skip = set(tuple(v.as_long() for (_,v) in tc) for tc in solver_bads)
+
+
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
 
@@ -412,10 +439,11 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
       log.debug('%s pro-examples', len(solver_goods))
 
       goods.extend(TestCase(type_vector, tc) for tc in solver_goods)
+      skip.update(tuple(v.as_long() for (_,v) in tc) for tc in solver_goods)
 
     filter = mk_and(premises) if premises else None
 
-    r_goods, r_bads = random_test_cases(num_random, e, symbols, type_vector, filter)
+    r_goods, r_bads = random_test_cases(num_random, e, symbols, type_vector, skip, filter)
 
     log.debug('randoms: %s good, %s bad', len(r_goods), len(r_bads))
 
@@ -473,13 +501,16 @@ def infer_precondition(opt,
 
     valid = True
 
-    for type_vector in type_vectors:
+    for n,type_vector in enumerate(type_model.type_vectors()):
+      print 'check', n
       smt = safety.Translator(type_vector)
 
       tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
 
       log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
         tgt_safe, premises, consequent)
+
+      assert not smt.reset_safe()
 
       pb,pd,_,_ = smt(pre)
       pre_safe = smt.reset_safe()
