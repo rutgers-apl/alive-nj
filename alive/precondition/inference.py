@@ -419,8 +419,11 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     e = mk_implies(safe + premises, consequent)
     log.debug('Query: %s', e)
 
-    solver_bads = list(
-      itertools.islice(get_models(z3.Not(e), symbol_smts), num_bad))
+    solver_bads = [tc
+      for tc in itertools.islice(get_models(z3.Not(e), symbol_smts), num_bad)
+      if not any(v is None for (_,v) in tc)]
+      # NOTE: getting None as a value means we can't use it as a test-case,
+      # but discarding them may lead to false positives
 
     log.debug('%s counter-examples', len(solver_bads))
 
@@ -433,8 +436,10 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
       input_smts = [smt.eval(t) for t in inputs]
 
       query = mk_and(premises + [z3.ForAll(input_smts, e)])
-      solver_goods = list(
-        itertools.islice(get_models(query, symbol_smts), num_good))
+      log.debug('Query\n%s', query)
+      solver_goods = [tc for
+        tc in itertools.islice(get_models(query, symbol_smts), num_good)
+        if not any(v is None for (_,v) in tc)]
 
       log.debug('%s pro-examples', len(solver_goods))
 
