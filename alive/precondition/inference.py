@@ -66,6 +66,7 @@ def learn_feature(config, good, bad):
     log.info('Checking size %s', size)
     for pred in enumerator.predicates(size, config):
       log.debug('Checking %s', pred)
+      reporter.consider_feature()
 
       cache = {}
       good_accept = sum(1 for g in good if test_feature(pred, g, cache))
@@ -175,6 +176,7 @@ def learn_boolean(feature_count, goods, bads):
   # generate clauses until all bad vectors are excluded
   while len(excludes) < len(bads):
     k += 1
+    reporter.increase_clause_size()
     clauses.extend(c for c in itertools.combinations(lits, k)
       if consistent_clause(c, goods))
 
@@ -209,6 +211,7 @@ def learn_boolean(feature_count, goods, bads):
       c = cs.pop()
 
       cover.append(clauses[c])
+      reporter.add_clause()
 
       # remove all vectors excluded by clauses[c]
       for v in excluded_by[c]:
@@ -258,6 +261,7 @@ def infer_precondition_by_examples(config, goods, bads,
   for f in features:
     feature_vectors = extend_feature_vectors(feature_vectors, f)
 
+    reporter.accept_feature()
     if log.isEnabledFor(logging.DEBUG):
       log.debug('Feature Vectors\n  ' +
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
@@ -276,6 +280,7 @@ def infer_precondition_by_examples(config, goods, bads,
 
     feature_vectors = extend_feature_vectors(feature_vectors, f, cache)
 
+    reporter.accept_feature()
     if log.isEnabledFor(logging.DEBUG):
       log.debug('Feature Vectors\n  ' +
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
@@ -403,6 +408,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad):
   log = logger.getChild('make_test_cases')
 
+
   goods = []
   bads = []
 
@@ -499,6 +505,7 @@ def infer_precondition(opt,
   config = enumerator.Config(symbols, reps, type_model)
 
   while not valid:
+    reporter.begin_round()
     pre = infer_precondition_by_examples(config, goods, bads, features)
 
     if log.isEnabledFor(logging.INFO):
@@ -506,8 +513,8 @@ def infer_precondition(opt,
 
     valid = True
 
-    for n,type_vector in enumerate(type_model.type_vectors()):
-      print 'check', n
+    for type_vector in type_model.type_vectors():
+      reporter.test_precondition()
       smt = safety.Translator(type_vector)
 
       tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
@@ -544,6 +551,94 @@ def infer_precondition(opt,
 
   return pre
 
+
+# ----
+
+import sys, os
+
+class SilentReporter(object):
+  def consider_feature(self): pass
+  def accept_feature(self): pass
+  def test_precondition(self): pass
+  def begin_round(self): pass
+  def increase_clause_size(self): pass
+  def add_clause(self): pass
+
+class Reporter(object):
+  _fmt_features = 'Round {0.round} Considered {0.generated_features:5} Accepted {0.features:2}'
+  _fmt_cnf = 'Round {0.round} Adding {0.k}-CNF clauses of {0.features} features'
+  _fmt_clauses = 'Round {0.round} Selected {0.clauses} clauses of {0.features} features'
+  _fmt_proofs = 'Round {0.round} Testing: {0.proofs:2} proofs'
+
+  def __init__(self):
+    self.generated_features = 0
+    self.features = 0
+    self.k = 0
+    self.clauses = 0
+    self.proofs = 0
+    self.round = 0
+    self.width = int(os.environ.get('COLUMNS', 80))
+
+    if sys.stdout.isatty():
+      self.status = sys.stdout
+    elif sys.stderr.isatty():
+      self.status = sys.stderr
+    else:
+      self.status = None
+
+  def write_message(self, msg):
+    self.status.write('\r')
+    self.status.write(msg[0:self.width])
+    self.status.write(' ' * (self.width - len(msg)))
+    self.status.flush()
+
+  def clear_message(self):
+    self.status.write('\r')
+    self.status.write(' ' * self.width)
+    self.status.write('\r')
+    self.status.flush()
+
+  def consider_feature(self):
+    self.generated_features += 1
+    if self.status:
+      self.write_message(self._fmt_features.format(self))
+
+  def accept_feature(self):
+    self.features += 1
+    if self.status:
+      self.write_message(self._fmt_features.format(self))
+
+  def increase_clause_size(self):
+    self.k += 1
+    if self.status:
+      self.write_message(self._fmt_cnf.format(self))
+
+  def add_clause(self):
+    self.clauses += 1
+    if self.status:
+      self.write_message(self._fmt_clauses.format(self))
+
+  def begin_round(self):
+    self.round += 1
+    self.generated_features = 0
+    self.features = 0
+    self.k = 0
+    self.clauses = 0
+    self.proofs = 0
+
+  def test_precondition(self):
+    if self.status:
+      self.write_message(self._fmt_proofs.format(self))
+
+    self.proofs += 1
+
+reporter = SilentReporter()
+
+def set_reporter(rep):
+  global reporter
+  reporter = rep
+
+
 def main():
   import argparse, sys, logging.config
   from alive import config, transform
@@ -559,8 +654,10 @@ def main():
   for opt in read_opt_files(args.file):
     print '-----'
     print opt.format()
+    set_reporter(Reporter())
 
     pre = infer_precondition(opt)
+    reporter.clear_message()
 
     opt.pre = pre
     print
