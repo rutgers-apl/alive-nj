@@ -29,10 +29,9 @@ def test_feature(pred, test_case, cache):
     pred_smt = cache[test_case.type_vector]
   except KeyError:
     smt = safety.Translator(test_case.type_vector)
-    p,pd,pp,pq = smt(pred)
-    assert not (pd or pp or pq)
-    ps = smt.reset_safe()
-    pred_smt = mk_and(ps + [p])
+    pre = smt(pred)
+    assert not (pre.defined or pre.nonpoison or pre.qvars)
+    pred_smt = mk_and(pre.safe + [pre.value])
     cache[test_case.type_vector] = pred_smt
 
   e = z3.simplify(z3.substitute(pred_smt, *test_case.values))
@@ -375,21 +374,19 @@ def interpret_opt(smt, opt):
   """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
   """
 
-  sv,sd,sp,sq = smt(opt.src)
-  if sq:
+  src = smt(opt.src)
+  if src.qvars:
     raise Exception('quantified variables in opt {!r}'.format(opt.name))
 
-  assert not smt.reset_safe()
+  assert not src.safe
 
-  sd.extend(sp)
+  sd = src.defined + src.nonpoison
 
-  tv,td,tp,_ = smt(opt.tgt)
-  ts = smt.reset_safe()
+  tgt = smt(opt.tgt)
 
-  td.extend(tp)
-  td.append(sv == tv)
+  td = tgt.defined + tgt.nonpoison + [src.value == tgt.value]
 
-  return ts, sd, mk_and(td)
+  return tgt.safe, sd, mk_and(td)
 
 def get_corner_cases(symbols, type_vector):
   def corners(symbol):
@@ -522,11 +519,11 @@ def infer_precondition(opt,
       log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
         tgt_safe, premises, consequent)
 
-      assert not smt.reset_safe()
 
-      pb,pd,_,_ = smt(pre)
-      pre_safe = smt.reset_safe()
-      pd.append(pb)
+      pre_smt = smt(pre)
+      pre_safe = pre_smt.safe
+      pd = pre_smt.defined + pre_smt.nonpoison
+      pd.append(pre_smt.value)
 
       log.debug('\npre_safe %s\npd %s', pre_safe, pd)
 

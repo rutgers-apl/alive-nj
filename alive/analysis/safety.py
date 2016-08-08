@@ -4,6 +4,7 @@ from ..z3util import mk_and, mk_or
 import z3
 import operator
 import logging
+import collections
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,20 @@ def mk_implies(premises, consequents):
   return consequents
 
 
+SMT = collections.namedtuple('SMT', 'value defined nonpoison safe qvars')
+
+
 class Translator(smtinterp.BaseSMTTranslator):
   def __init__(self, type_model, **kws):
     super(Translator, self).__init__(type_model, **kws)
     self._safe = []
+
+  def __call__(self, term):
+    self._safe = []
+    v,d,p,q = super(Translator, self).__call__(term)
+    s = self._safe
+
+    return SMT(value=v, defined=d, nonpoison=p, safe=s, qvars=q)
 
   def add_safe(self, conds):
     self._safe.extend(conds)
@@ -118,22 +129,21 @@ def check_safety(opt, type_model=None):
   smt = Translator(type_model)
 
   if opt.pre:
-    pb,pd,_,_ = smt(opt.pre)
-    pd.append(pb)
-    ps = smt.reset_safe()
+    pre = smt(opt.pre)
+    pd = pre.defined + pre.nonpoison
+    pd.append(pre.value)
+    ps = pre.safe
   else:
     pd = []
     ps = []
 
-  sv,sd,sp,sq = smt(opt.src)
-  ss = smt.reset_safe()
-  assert not ss
+  src = smt(opt.src)
+  assert not src.safe
 
-  tv,td,tp,tq = smt(opt.tgt)
-  ts = smt.reset_safe()
+  tgt = smt(opt.tgt)
 
-  e = mk_and(ps + mk_implies(pd, ts))
-  logger.debug('expr: %s', e)
+  e = mk_and(ps + mk_implies(pd, tgt.safe))
+  logger.debug('expr:\n%s', e)
 
   s = z3.Solver()
   s.add(z3.Not(e))
@@ -148,9 +158,9 @@ def check_safety(opt, type_model=None):
   model  = s.model()
   logger.info('Found counterexample: %s', model)
 
-  s.add(sd)
-  s.add(sp)
-  logger.debug('Second check: %s', s)
+  s.add(src.defined)
+  s.add(src.nonpoison)
+  logger.debug('Second check:\n%s', s)
 
   res = s.check()
   if res == z3.sat:
