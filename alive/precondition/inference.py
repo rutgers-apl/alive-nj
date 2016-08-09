@@ -370,9 +370,16 @@ def get_models(expr, vars):
   if res == z3.unknown:
     raise Exception('Solver returned unknown: ' + s.reason_unknown())
 
-def interpret_opt(smt, opt):
+def interpret_opt(smt, opt, strengthen=False):
   """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
   """
+
+  if strengthen:
+    assert opt.pre
+    pre = smt(opt.pre)
+    safe = pre.safe + pre.defined + pre.nonpoison + [pre.value]
+  else:
+    safe = []
 
   src = smt(opt.src)
   if src.qvars:
@@ -383,10 +390,11 @@ def interpret_opt(smt, opt):
   sd = src.defined + src.nonpoison
 
   tgt = smt(opt.tgt)
+  safe.extend(tgt.safe)
 
   td = tgt.defined + tgt.nonpoison + [src.value == tgt.value]
 
-  return tgt.safe, sd, mk_and(td)
+  return safe, sd, mk_and(td)
 
 def get_corner_cases(symbols, type_vector):
   def corners(symbol):
@@ -402,7 +410,7 @@ def get_corner_cases(symbols, type_vector):
   return list(itertools.product(*map(corners, symbols)))
 
 def make_test_cases(opt, symbols, inputs, type_vectors,
-    num_random, num_good, num_bad):
+    num_random, num_good, num_bad, strengthen=False):
   log = logger.getChild('make_test_cases')
 
 
@@ -417,9 +425,10 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     symbol_smts = [smt.eval(t) for t in symbols]
 
-    safe, premises, consequent = interpret_opt(smt, opt)
+    safe, premises, consequent = interpret_opt(smt, opt, strengthen)
 
-    e = mk_implies(safe + premises, consequent)
+
+    e = mk_and(safe + [mk_implies(premises, consequent)])
     log.debug('Query: %s', e)
 
     solver_bads = [tc
@@ -465,7 +474,8 @@ def infer_precondition(opt,
     features=None,
     random_cases=100,
     solver_good=10,
-    solver_bad=10):
+    solver_bad=10,
+    strengthen=False):
   log = logger.getChild('infer')
 
   if log.isEnabledFor(logging.INFO):
@@ -492,7 +502,7 @@ def infer_precondition(opt,
   assert all(isinstance(t, L.Value) for t in reps)
 
   goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
-    random_cases, solver_good, solver_bad)
+    random_cases, solver_good, solver_bad, strengthen)
 
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
 
@@ -643,6 +653,8 @@ def main():
   logging.config.dictConfig(config.logs)
 
   parser = argparse.ArgumentParser()
+  parser.add_argument('--strengthen', action='store_true',
+    help='Find a stronger precondition')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin])
 
@@ -653,7 +665,7 @@ def main():
     print opt.format()
     set_reporter(Reporter())
 
-    pre = infer_precondition(opt)
+    pre = infer_precondition(opt, strengthen=args.strengthen)
     reporter.clear_message()
 
     opt.pre = pre
