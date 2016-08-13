@@ -206,8 +206,10 @@ def learn_boolean(feature_count, goods, bads):
       log.debug('%s clauses excluding %s', len(cs), s)
 
       # select arbitrary clause
-      # (better to select the smallest clause?)
-      c = cs.pop()
+      # (pick the earliest one, as it will be simplest)
+      #c = cs.pop()
+      c = min(cs)
+      cs.remove(c)
 
       cover.append(clauses[c])
       reporter.add_clause()
