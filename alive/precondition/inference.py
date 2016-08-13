@@ -304,53 +304,17 @@ def infer_precondition_by_examples(config, goods, bads,
 
   return pre
 
-def random_test_cases(num, expr, symbols, type_vector, skip, filter=None):
-  smt = smtinterp.SMTPoison(type_vector)
+def satisfiable(expr, substitutes):
+  """Return whether expr can be satisfied, given the substitutions.
+  """
+  s = z3.Solver()
+  s.add(z3.substitute(expr, *substitutes))
+  res = s.check()
 
-  symbol_types = [type_vector[typing.context[t]] for t in symbols]
-  symbol_smts = [smt.eval(t) for t in symbols]
+  if res == z3.unknown:
+    logging.warn('Unknown result:\n%s', s)
 
-  goods = []
-  bads = []
-
-  for _ in xrange(num):
-    tc_vals = tuple(random.randrange(0, 2**ty.width) for ty in symbol_types)
-
-    if tc_vals in skip:
-      continue
-
-    skip.add(tc_vals)
-
-    tc = TestCase(type_vector,
-      tuple(itertools.imap(lambda s,v,ty: (s, z3.BitVecVal(v, ty.width)),
-        symbol_smts, tc_vals, symbol_types)))
-
-#     tc_vals = (z3.BitVecVal(random.randrange(0, 2**ty.width), ty.width)
-#       for ty in symbol_types)
-#
-#     tc = TestCase(type_vector, tuple(itertools.izip(symbol_smts, tc_vals)))
-
-    if filter:
-      s = z3.Solver()
-      s.add(z3.substitute(filter, *tc.values))
-      res = s.check()
-      if res == z3.unsat:
-        continue
-      if res == z3.unknown:
-        logging.warn('Unknown result for filter %s', tc)
-        continue
-
-    s = z3.Solver()
-    s.add(z3.Not(z3.substitute(expr, *tc.values)))
-    res = s.check()
-    if res == z3.unsat:
-      goods.append(tc)
-    elif res == z3.sat:
-      bads.append(tc)
-    else:
-      logging.warn('Unknown result for tc %s', tc)
-
-  return goods, bads
+  return res == z3.sat
 
 def get_models(expr, vars):
   """Generate tuples satisfying the expression.
@@ -396,10 +360,18 @@ def interpret_opt(smt, opt, strengthen=False):
 
   return safe, sd, mk_and(td)
 
-def get_corner_cases(symbols, type_vector):
-  def corners(symbol):
-    ty = type_vector[typing.context[symbol]]
+def random_cases(types):
+  """Generate infinitely many possible values for the given list of types.
+  """
+  assert all(isinstance(ty, L.IntType) for ty in types)
 
+  while True:
+    yield tuple(random.randrange(0, 2**ty.width) for ty in types)
+
+def get_corner_cases(types):
+  """Generate every combination of 0,1,-1, and INT_MIN.
+  """
+  def corners(ty):
     if ty == L.IntType(1):
       return [0,1]
     elif isinstance(ty, L.IntType):
@@ -407,7 +379,7 @@ def get_corner_cases(symbols, type_vector):
     else:
       return []
 
-  return list(itertools.product(*map(corners, symbols)))
+  return itertools.product(*map(corners, types))
 
 def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad, strengthen=False):
@@ -427,9 +399,8 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     safe, premises, consequent = interpret_opt(smt, opt, strengthen)
 
-
     e = mk_and(safe + [mk_implies(premises, consequent)])
-    log.debug('Query: %s', e)
+    log.debug('Query:\n%s', e)
 
     solver_bads = [tc
       for tc in itertools.islice(get_models(z3.Not(e), symbol_smts), num_bad)
@@ -460,12 +431,26 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     filter = mk_and(premises) if premises else None
 
-    r_goods, r_bads = random_test_cases(num_random, e, symbols, type_vector, skip, filter)
+    symbol_types = [type_vector[typing.context[s]] for s in symbols]
+    corner_tcs = get_corner_cases(symbol_types)
+    random_tcs = itertools.islice(random_cases(symbol_types), num_random)
 
-    log.debug('randoms: %s good, %s bad', len(r_goods), len(r_bads))
+    for tc_vals in itertools.chain(corner_tcs, random_tcs):
+      if tc_vals in skip: continue
 
-    goods.extend(r_goods)
-    bads.extend(r_bads)
+      skip.add(tc_vals)
+
+      tc = TestCase(type_vector,
+        tuple(itertools.imap(lambda s,v,ty: (s, z3.BitVecVal(v, ty.width)),
+          symbol_smts, tc_vals, symbol_types)))
+
+      if filter and not satisfiable(filter, tc.values):
+        continue
+
+      if satisfiable(z3.Not(e), tc.values):
+        bads.append(tc)
+      else:
+        goods.append(tc)
 
   return goods, bads
 
@@ -492,14 +477,15 @@ def infer_precondition(opt,
   inputs = []
   reps = [None] * type_model.tyvars
   for t in L.subterms(opt.src):
-    reps[typing.context[t]] = t
+    if isinstance(t, (L.Input, L.Instruction)):
+      reps[typing.context[t]] = t
     if isinstance(t, L.Symbol):
       symbols.append(t)
     elif isinstance(t, L.Input):
       inputs.append(t)
 
   reps = [r for r in reps if r is not None]
-  assert all(isinstance(t, L.Value) for t in reps)
+  assert all(isinstance(t, (L.Input, L.Instruction)) for t in reps)
 
   goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
     random_cases, solver_good, solver_bad, strengthen)
