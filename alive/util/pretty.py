@@ -35,7 +35,7 @@ built-in Python collections.
    'eggs',
    'bacon',
    'spam']
-   
+
 Non-document arguments to 'seq', 'group', and 'join' are passed through 'text'.
 'softline' breaks if the text following it is too long to fit. This can be
 combined with join to do word wrapping.
@@ -81,7 +81,7 @@ def group(*docs):
 
 def text(string):
   '''Converts a string to a Doc.
-  
+
   Docs are passed through unchanged. Other objects are passed to prepr.
   '''
   if isinstance(string, Doc): return string
@@ -90,7 +90,7 @@ def text(string):
 
 def prepr(obj):
   '''Converts an object to a Doc, similar to repr.
-  
+
   prepr(obj) -> obj.pretty(), if obj has a member pretty.
   prepr(obj) special-cases tuples, lists, dicts, sets, and frozensets.
   prepr(obj) -> text(repr(obj)) for all other objects
@@ -193,9 +193,9 @@ class PrettyRepr(object):
 
 class Doc(PrettyRepr):
   '''The intermediate formatting tree generated during pretty printing.
-  
+
   Use text, prepr, group, seq, line, lbreak, and others to create Docs.
-  
+
   Combine Docs with +, or use | to put a line between them.
   '''
   __slots__ = ()
@@ -203,24 +203,24 @@ class Doc(PrettyRepr):
 
   def __add__(self, other):
     return seq(self, other)
-  
+
   def __radd__(self, other):
     return seq(other, self)
-  
+
   def __or__(self, other):
     'doc | obj -> seq(doc, line, obj)'
     return seq(self, line, other)
-  
+
   def __ror__(self, other):
     return seq(other, line, self)
-    
+
   def nest(self, indent):
     """Increase indentation level.
-    
+
     doc.nest(x) == nest(x, doc)
     """
     return _Nest(indent, self)
-  
+
   def join(self, docs):
     """Concatenate the docs, separated by this Doc."""
     return iter_seq(joinit(docs, self))
@@ -263,7 +263,7 @@ class _Text(Doc):
   def __init__(self, text):
     assert '\n' not in text
     self.text = text
-  
+
   def send(self, out, indent):
     out((Doc.Text, self.text))
 
@@ -329,7 +329,7 @@ class _Pretty(Doc):
   __slots__ = ('obj',)
   def __init__(self, obj):
     self.obj = obj
-    
+
   def send(self, out, indent):
     self.obj.pretty().send(out, indent)
 
@@ -349,7 +349,7 @@ class GrowGroups(object):
   If a group is immediately followed by trailing text, we should take it
   into account when choosing whether to break the group. This stream
   transformer pushes GEnds past any trailing text.
-  
+
   Furthermore, since GBegin can always be moved past text, GrowGroups also
   pushes them to the right as far as possible. This will eliminate some
   groups if they contain only text.
@@ -391,7 +391,7 @@ class GrowGroups(object):
 
 class AddHP(object):
   '''Annotate events with their horizontal position.
-  
+
   Assuming an infinitely-wide canvas, how many characters to the right is the
   _end_ of this event.
   '''
@@ -404,21 +404,21 @@ class AddHP(object):
     if event[0] == Doc.Text:
       self.pos += len(event[1])
       self.next((Doc.Text, self.pos, event[1]))
-    
+
     elif event[0] == Doc.Line:
       self.pos += 1
       self.next((Doc.Line, self.pos, event[1]))
-    
+
     elif event[0] == Doc.Break:
       self.next((Doc.Break, self.pos, event[1]))
-    
+
     else:
       self.next((event[0], self.pos))
 
 
 class Buf(object):
   'Sequence type providing O(1) insert at either end, and O(1) concatenation.'
-  
+
   def __init__(self):
     self.head = []
     self.tail = self.head
@@ -448,7 +448,7 @@ class Buf(object):
 class AddGBeginPos(object):
   '''
   Annotate GBegin events with the horizontal position of the end of the group.
-  
+
   Because this waits until the entire group has been seen, so its latency and
   memory use are unbounded.
   '''
@@ -459,7 +459,7 @@ class AddGBeginPos(object):
   def __call__(self, event):
     if event[0] == Doc.GBegin:
       self.bufs.append(Buf())
-    
+
     elif self.bufs and event[0] == Doc.GEnd:
       pos = event[1]
       buf = self.bufs.pop()
@@ -480,7 +480,7 @@ class AddGBeginPos(object):
 class FindGroupEnds(object):
   '''
   Annotate GBegin events with the horizontal position of the end of the group.
-  
+
   GBegins corresponding to groups larger than the width will be annotated with
   'None'. This keeps memory usage and latency bounded, at the cost of some
   potential inaccuracy. (Zero-width groups may cause FindGroupEnds to declare
@@ -502,13 +502,13 @@ class FindGroupEnds(object):
         else:
           for event in buf:
             self.next(event)
-      
+
       else:
         if event[0] == Doc.GBegin:
           self.bufs.append((event[1] + self.width, Buf()))
         else:
           self.bufs[-1][1].append(event)
-        
+
         while self.bufs[0][0] < event[1] or len(self.bufs) > self.width:
           self.next((Doc.GBegin, None))
           _, buf = self.bufs.popleft()
@@ -525,7 +525,7 @@ class FindGroupEnds(object):
 
 class TextEvents(object):
   """Write an annotated event stream to some method.
-  
+
   Arguments:
     width - Desired maximum width for printing
     out   - A function which accepts strings (e.g. sys.stdout.write)
@@ -618,7 +618,7 @@ def block_print(obj, width=80):
 
     elif event[0] == Doc.Text:
       next(event)
-  
+
   text(obj).send(blk, 0)
   next.flush()
   sys.stdout.write('\n')
