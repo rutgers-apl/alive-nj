@@ -137,6 +137,7 @@ def pprint(*objs, **kws):
   if not first:
     file.write(prefix)
     file.write(' ' * indent)
+    kws['start_at'] = len(prefix) + indent
 
   doc.write_to(file, indent=indent, prefix=prefix, **kws)
   if end:
@@ -532,14 +533,15 @@ class TextEvents(object):
   Keywords:
     prefix - A string to put the start of each line. This counts against
              the given width.
+    start_at - Assume this many characters have been printed on the first line
   """
 
-  def __init__(self, width, out, prefix=''):
+  def __init__(self, width, out, prefix='', start_at=0):
     self.width = width - len(prefix)
     self.newline = '\n' + prefix
     self.out = out
     self.fits = 0
-    self.hpl = width
+    self.hpl = width - start_at
 
   def __call__(self, event):
     if event[0] == Doc.Text:
