@@ -615,7 +615,7 @@ class Reporter(object):
 
   def begin_round(self):
     self.round += 1
-    self.generated_features = 0
+    #self.generated_features = 0
     self.features = 0
     self.k = 0
     self.clauses = 0
@@ -659,6 +659,9 @@ def main():
     opt.pre = pre
     print
     print opt.format()
+    print '; rounds', reporter.round
+    print '; features in final round', reporter.features
+    print '; total features generated', reporter.generated_features
 
 if __name__ == '__main__':
   main()
