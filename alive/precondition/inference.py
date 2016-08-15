@@ -38,12 +38,13 @@ def test_feature(pred, test_case, cache):
   assert z3.is_bool(e)
   return z3.is_true(e)
 
-def learn_feature_1(config, good, bad):
+def learn_feature(config, good, bad):
   log = logger.getChild('learn_feature')
   for size in itertools.count(3):
     log.info('Checking size %s', size)
     for pred in enumerator.predicates(size, config):
       log.debug('Checking %s', pred)
+      reporter.consider_feature()
 
       cache = {}
       good_accept = sum(1 for g in good if test_feature(pred, g, cache))
@@ -58,7 +59,7 @@ def learn_feature_1(config, good, bad):
 #           all(not test_feature(pred, b, cache) for b in bad):
 #         return pred, cache
 
-def learn_feature(config, good, bad):
+def learn_feature_1(config, good, bad):
   log = logger.getChild('learn_feature')
   threshold = min(CONFLICT_SET_CUTOFF, len(good)+len(bad))
   for size in itertools.count(3):
@@ -123,7 +124,7 @@ def sample_largest_conflict_set(vectors):
 
   return chosen
 
-find_conflict_set = find_largest_conflict_set
+find_conflict_set = sample_largest_conflict_set
 
 def partition(feature, cache, cases):
   sats = []
