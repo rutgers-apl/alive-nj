@@ -4,7 +4,7 @@ from .. import typing
 from .. import smtinterp
 from ..analysis import safety
 from ..util.pretty import pformat
-from ..z3util import mk_and, mk_or
+from ..z3util import mk_and, mk_or, mk_forall
 import collections
 import itertools
 import logging
@@ -420,7 +420,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
 
-      query = mk_and(premises + [z3.ForAll(input_smts, e)])
+      query = mk_and(premises + [mk_forall(input_smts, [e])])
       log.debug('Query\n%s', query)
       solver_goods = [tc for
         tc in itertools.islice(get_models(query, symbol_smts), num_good)
