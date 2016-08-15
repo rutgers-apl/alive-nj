@@ -97,8 +97,8 @@ def find_largest_conflict_set(vectors):
 
   log = logger.getChild('find_largest_conflict_set')
   if chosen and log.isEnabledFor(logging.DEBUG):
-    log.debug('\n  good: ' + pformat(chosen[0], indent=8) +
-              '\n  bad:  ' + pformat(chosen[1], indent=8))
+    log.debug('\n  good: ' + pformat(chosen[0], indent=8, start_at=8) +
+              '\n  bad:  ' + pformat(chosen[1], indent=8, start_at=8))
 
   return chosen
 
@@ -119,8 +119,8 @@ def sample_largest_conflict_set(vectors):
 
     log = logger.getChild('sample_largest_conflict_set')
     if log.isEnabledFor(logging.DEBUG):
-      log.debug('\n  good: ' + pformat(g, indent=8) +
-                '\n  bad:  ' + pformat(b, indent=8))
+      log.debug('\n  good: ' + pformat(g, indent=8, start_at=8) +
+                '\n  bad:  ' + pformat(b, indent=8, start_at=8))
 
   return chosen
 
