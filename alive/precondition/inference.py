@@ -456,6 +456,21 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
   return goods, bads
 
+def exponential_sample(iterable):
+  """Yield iter[0], iter[1], iter[2], iter[4], ...
+  """
+  it = iter(iterable)
+
+  yield it.next()
+  yield it.next()
+
+  skip = 1
+  while True:
+    for _ in xrange(skip):
+      x = it.next()
+
+    yield x
+    skip *= 2
 
 def infer_precondition(opt,
     features=None,
@@ -472,7 +487,7 @@ def infer_precondition(opt,
       random_cases, solver_good, solver_bad)
 
   type_model = opt.abstract_type_model()
-  type_vectors = list(itertools.islice(type_model.type_vectors(), 4))
+  type_vectors = list(exponential_sample(type_model.type_vectors()))
     # FIXME: configure number of inital vectors somehow
 
   symbols = []
