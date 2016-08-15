@@ -243,7 +243,7 @@ def mk_OrPred(clauses):
 
 
 def infer_precondition_by_examples(config, goods, bads,
-    features=None):
+    features=()):
   """Synthesize a precondition which accepts the good examples and
   rejects the bad examples.
 
@@ -252,8 +252,7 @@ def infer_precondition_by_examples(config, goods, bads,
   """
   log = logger.getChild('pie')
 
-  if features is None:
-    features = []
+  features = list(features)
 
   log.info('Inferring: %s good, %s bad, %s features', len(goods),
     len(bads), len(features))
@@ -473,11 +472,12 @@ def exponential_sample(iterable):
     skip *= 2
 
 def infer_precondition(opt,
-    features=None,
+    features=(),
     random_cases=100,
     solver_good=10,
     solver_bad=10,
-    strengthen=False):
+    strengthen=False,
+    use_features=False):
   log = logger.getChild('infer')
 
   if log.isEnabledFor(logging.INFO):
@@ -513,6 +513,10 @@ def infer_precondition(opt,
   pre = None
 
   config = enumerator.Config(symbols, reps, type_model)
+
+  if use_features:
+    features = [t for t in L.subterms(opt.pre)
+                    if isinstance(t, (L.Comparison, L.FunPred))]
 
   while not valid:
     reporter.begin_round()
@@ -658,6 +662,8 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--strengthen', action='store_true',
     help='Find a stronger precondition')
+  parser.add_argument('--features', action='store_true',
+    help='Take clauses from precondition as initial features')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin])
 
@@ -668,7 +674,9 @@ def main():
     print opt.format()
     set_reporter(Reporter())
 
-    pre = infer_precondition(opt, strengthen=args.strengthen)
+    pre = infer_precondition(opt, strengthen=args.strengthen,
+      use_features=args.features,
+      random_cases=500)
     reporter.clear_message()
 
     opt.pre = pre
