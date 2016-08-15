@@ -579,7 +579,7 @@ class SilentReporter(object):
   def add_clause(self): pass
 
 class Reporter(object):
-  _fmt_features = 'Round {0.round} Considered {0.generated_features:5} Accepted {0.features:2}'
+  _fmt_features = 'Round {0.round} Considered {0.generated_features:5,} Accepted {0.features:2}'
   _fmt_cnf = 'Round {0.round} Adding {0.k}-CNF clauses of {0.features} features'
   _fmt_clauses = 'Round {0.round} Selected {0.clauses} clauses of {0.features} features'
   _fmt_proofs = 'Round {0.round} Testing: {0.proofs:2} proofs'
@@ -682,9 +682,8 @@ def main():
     opt.pre = pre
     print
     print opt.format()
-    print '; rounds', reporter.round
-    print '; features in final round', reporter.features
-    print '; total features generated', reporter.generated_features
+    print '; rounds {0.round:,}\n; features in final round {0.features:,}\n' \
+      '; total features generated {0.generated_features:,}'.format(reporter)
 
 if __name__ == '__main__':
   main()
