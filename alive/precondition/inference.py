@@ -413,6 +413,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     log.debug('%s counter-examples', len(solver_bads))
 
     bads.extend(TestCase(type_vector, tc) for tc in solver_bads)
+    reporter.test_cases(goods, bads)
 
     skip = set(tuple(v.as_long() for (_,v) in tc) for tc in solver_bads)
 
@@ -430,6 +431,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
       goods.extend(TestCase(type_vector, tc) for tc in solver_goods)
       skip.update(tuple(v.as_long() for (_,v) in tc) for tc in solver_goods)
+      reporter.test_cases(goods, bads)
 
     filter = mk_and(premises) if premises else None
 
@@ -453,6 +455,9 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
         bads.append(tc)
       else:
         goods.append(tc)
+
+      reporter.test_cases(goods, bads)
+
 
   return goods, bads
 
@@ -572,6 +577,7 @@ def infer_precondition(opt,
 import sys, os
 
 class SilentReporter(object):
+  def test_cases(self, good, bad): pass
   def consider_feature(self): pass
   def accept_feature(self): pass
   def test_precondition(self): pass
@@ -580,12 +586,15 @@ class SilentReporter(object):
   def add_clause(self): pass
 
 class Reporter(object):
+  _fmt_cases = 'Round {0.round} Adding test cases: {0.num_good_cases:,}/{0.num_bad_cases:,}'
   _fmt_features = 'Round {0.round} Considered {0.generated_features:5,} Accepted {0.features:2}'
   _fmt_cnf = 'Round {0.round} Adding {0.k}-CNF clauses of {0.features} features'
   _fmt_clauses = 'Round {0.round} Selected {0.clauses} clauses of {0.features} features'
   _fmt_proofs = 'Round {0.round} Testing: {0.proofs:2} proofs'
 
   def __init__(self):
+    self.num_good_cases = 0
+    self.num_bad_cases = 0
     self.generated_features = 0
     self.features = 0
     self.k = 0
@@ -612,6 +621,11 @@ class Reporter(object):
     self.status.write(' ' * self.width)
     self.status.write('\r')
     self.status.flush()
+
+  def test_cases(self, good, bad):
+    self.num_good_cases = len(good)
+    self.num_bad_cases = len(bad)
+    self.write_message(self._fmt_cases.format(self))
 
   def consider_feature(self):
     self.generated_features += 1
