@@ -413,6 +413,8 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
   num_random = max(0, num_random)
 
   for type_vector in type_vectors:
+    log.debug('Making cases for %s', type_vector)
+
     smt = safety.Translator(type_vector)
 
     symbol_smts = [smt.eval(t) for t in symbols]
@@ -512,7 +514,6 @@ def infer_precondition(opt,
 
   type_model = opt.abstract_type_model()
   type_vectors = list(exponential_sample(type_model.type_vectors()))
-    # FIXME: configure number of inital vectors somehow
 
   symbols = []
   inputs = []
