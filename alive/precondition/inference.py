@@ -242,6 +242,24 @@ def mk_OrPred(clauses):
 
   return L.OrPred(*clauses)
 
+_neg_icmp_ops = {
+  'eq':  'ne',
+  'ne':  'eq',
+  'slt': 'sge',
+  'sle': 'sgt',
+  'sgt': 'sle',
+  'sge': 'slt',
+  'ult': 'uge',
+  'ule': 'ugt',
+  'ugt': 'ule',
+  'uge': 'ult',
+}
+
+def negate_pred(pred):
+  if isinstance(pred, L.Comparison):
+    return pred.copy(op=_neg_icmp_ops[pred.op])
+
+  return L.NotPred(pred)
 
 def infer_precondition_by_examples(config, goods, bads,
     features=()):
@@ -301,7 +319,7 @@ def infer_precondition_by_examples(config, goods, bads,
 
   pre = mk_AndPred(
           mk_OrPred(
-            L.NotPred(features[l]) if l < 0 else features[l] for l in c)
+            negate_pred(features[l]) if l < 0 else features[l] for l in c)
           for c in clauses)
 
   return pre
