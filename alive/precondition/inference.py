@@ -24,6 +24,8 @@ def mk_implies(premises, consequent):
 
 TestCase = collections.namedtuple('TestCase', ['type_vector', 'values'])
 
+REJECT, ACCEPT, UNSAFE = range(3)
+
 def test_feature(pred, test_case, cache):
   try:
     pred_smt = cache[test_case.type_vector]
@@ -31,12 +33,21 @@ def test_feature(pred, test_case, cache):
     smt = safety.Translator(test_case.type_vector)
     pre = smt(pred)
     assert not (pre.defined or pre.nonpoison or pre.qvars)
-    pred_smt = mk_and(pre.safe + [pre.value])
+    pred_smt = (pre.safe, pre.value)
     cache[test_case.type_vector] = pred_smt
 
-  e = z3.simplify(z3.substitute(pred_smt, *test_case.values))
+  if pred_smt[0]:
+    safe = z3.simplify(z3.substitute(mk_and(pred_smt[0]), *test_case.values))
+    assert z3.is_bool(safe)
+    if z3.is_false(safe):
+      return UNSAFE
+
+  e = z3.simplify(z3.substitute(pred_smt[1], *test_case.values))
   assert z3.is_bool(e)
-  return z3.is_true(e)
+  if z3.is_true(e):
+    return ACCEPT
+
+  return REJECT
 
 def learn_feature(config, good, bad):
   log = logger.getChild('learn_feature')
@@ -47,17 +58,25 @@ def learn_feature(config, good, bad):
       reporter.consider_feature()
 
       cache = {}
-      good_accept = sum(1 for g in good if test_feature(pred, g, cache))
-      bad_accept  = sum(1 for b in bad if test_feature(pred, b, cache))
+      good_results = [0]*3
+      for g in good:
+        good_results[test_feature(pred, g, cache)] += 1
 
-      log.debug('Accepted: %s good, %s bad', good_accept, bad_accept)
+      log.debug('Good Results: %s', good_results)
 
-      if (good_accept == len(good) and bad_accept == 0) or \
-          (good_accept == 0 and bad_accept == len(bad)):
+      if good_results[UNSAFE] or \
+          (good_results[ACCEPT] and good_results[REJECT]):
+        continue
+
+      bad_results = [0]*3
+      for b in bad:
+        bad_results[test_feature(pred, b, cache)] += 1
+
+      log.debug('Bad Results: %s', bad_results)
+
+      if (good_results[ACCEPT] and not bad_results[ACCEPT]) or \
+          (good_results[REJECT] and not bad_results[REJECT]):
         return pred, cache
-#       if all(test_feature(pred, g, cache) for g in good) and \
-#           all(not test_feature(pred, b, cache) for b in bad):
-#         return pred, cache
 
 def learn_feature_1(config, good, bad):
   log = logger.getChild('learn_feature')
@@ -127,16 +146,13 @@ def sample_largest_conflict_set(vectors):
 find_conflict_set = sample_largest_conflict_set
 
 def partition(feature, cache, cases):
-  sats = []
-  unsats = []
+  partitions = [[],[],[]]
 
   for tc in cases:
-    if test_feature(feature, tc, cache):
-      sats.append(tc)
-    else:
-      unsats.append(tc)
+    result = test_feature(feature, tc, cache)
+    partitions[result].append(tc)
 
-  return sats, unsats
+  return partitions
 
 def extend_feature_vectors(vectors, feature, cache=None):
   if cache is None:
@@ -144,18 +160,18 @@ def extend_feature_vectors(vectors, feature, cache=None):
 
   new_vectors = []
   for vector, good, bad in vectors:
-    good_t, good_f = partition(feature, cache, good)
-    bad_t, bad_f = partition(feature, cache, bad)
+    good_p = partition(feature, cache, good)
+    bad_p = partition(feature, cache, bad)
 
-    if good_t or bad_t:
-      new_vectors.append((vector + (True,), good_t, bad_t))
-    if good_f or bad_f:
-      new_vectors.append((vector + (False,), good_f, bad_f))
+    for result in xrange(3):
+      if good_p[result] or bad_p[result]:
+        new_vectors.append((vector + (result,), good_p[result], bad_p[result]))
 
   return new_vectors
 
 def clause_accepts(clause, vector):
-  return any((l < 0 and not vector[l]) or (l >= 0 and vector[l]) for l in clause)
+  return any(vector[l] == REJECT if l < 0 else vector[l] == ACCEPT
+              for l in clause)
 
 def consistent_clause(clause, vectors):
   return all(clause_accepts(clause, v) for v in vectors)
@@ -176,6 +192,7 @@ def learn_boolean(feature_count, goods, bads):
   # generate clauses until all bad vectors are excluded
   while len(excludes) < len(bads):
     k += 1
+    assert k <= feature_count # FIXME
     reporter.increase_clause_size()
     clauses.extend(c for c in itertools.combinations(lits, k)
       if consistent_clause(c, goods))
