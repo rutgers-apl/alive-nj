@@ -4,6 +4,9 @@ import itertools
 import collections
 
 Config = collections.namedtuple('Config', 'symbols type_reps model')
+# symbols:   maps tyvars to terms
+# type_reps: list of terms to use for width()
+# model:     the AbstractTypeModel
 
 def set_type(term, tyvar):
   assert term not in typing.context
@@ -28,15 +31,13 @@ def expressions(size, tyvar, config):
     return
 
   if size == 1:
-    for s in config.symbols:
-      if typing.context[s] == tyvar:
-        yield s, True
-#     return
-#
-#   if size == 2:
+    for s in config.symbols.get(tyvar, []):
+      yield s, True
+
     yield set_type(L.Literal(0), tyvar), False
     yield set_type(L.Literal(1), tyvar), False
     yield set_type(L.Literal(-1), tyvar), False
+      # TODO: figure out a way to produce C == -1 but not C + -1
 
     for r in config.type_reps:
       yield set_type(L.WidthCnxp(r), tyvar), tyvar == config.model.default_id
@@ -57,22 +58,19 @@ def expressions(size, tyvar, config):
       yield set_type(op(e), tyvar), s
 
   # TODO: functions
-  size =- 1
+  size -= 1
   for e,s in expressions(size, tyvar, config):
     if not s: continue
     yield set_type(L.AbsCnxp(e), tyvar), s
 
-  # FIXME: precompute!
-  tyvars = { typing.context[s] for s in config.symbols }
-  assert config.model.default_id not in tyvars
-  for t2 in tyvars:
+  for t2 in config.symbols.iterkeys():
     for e,s in expressions(size, t2, config):
       if not s: continue
       yield set_type(L.Log2Cnxp(e), tyvar), tyvar == config.model.default_id
 
 def predicates(size, config):
-  tyvars = { typing.context[s] for s in config.symbols }
-  tyvars.add(config.model.default_id)
+  tyvars = config.symbols.keys()
+  tyvars.append(config.model.default_id)
 
   # enumerate comparisons
   for lsize in xrange(1, (size-1)/2+1):

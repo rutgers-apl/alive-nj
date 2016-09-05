@@ -516,6 +516,7 @@ def infer_precondition(opt,
   type_vectors = list(exponential_sample(type_model.type_vectors()))
 
   symbols = []
+  ty_symbols = collections.defaultdict(list)
   inputs = []
   reps = [None] * type_model.tyvars
   for t in L.subterms(opt.src):
@@ -523,6 +524,7 @@ def infer_precondition(opt,
       reps[typing.context[t]] = t
     if isinstance(t, L.Symbol):
       symbols.append(t)
+      ty_symbols[typing.context[t]].append(t)
     elif isinstance(t, L.Input):
       inputs.append(t)
 
@@ -537,7 +539,7 @@ def infer_precondition(opt,
   valid = not bads
   pre = None
 
-  config = enumerator.Config(symbols, reps, type_model)
+  config = enumerator.Config(ty_symbols, reps, type_model)
 
   if use_features:
     features = [t for t in L.subterms(opt.pre)
