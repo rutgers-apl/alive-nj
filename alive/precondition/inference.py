@@ -663,7 +663,8 @@ class Reporter(object):
   def test_cases(self, good, bad):
     self.num_good_cases = len(good)
     self.num_bad_cases = len(bad)
-    self.write_message(self._fmt_cases.format(self))
+    if self.status:
+      self.write_message(self._fmt_cases.format(self))
 
   def consider_feature(self):
     self.generated_features += 1
