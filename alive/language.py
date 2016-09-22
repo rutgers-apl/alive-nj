@@ -30,7 +30,7 @@ class IntType(Type, Comparable):
   __slots__ = ('width',)
   def __init__(self, width):
     self.width = width
-  
+
   def __repr__(self):
     return 'IntType({0!r})'.format(self.width)
 
@@ -155,7 +155,7 @@ class Node(pretty.PrettyRepr):
 #   def __eq__(self, other):
 #     return type(self) is type(other) and \
 #       all(getattr(self,s) == getattr(other,s) for s in self.__slots__)
-# 
+#
 #   def __hash__(self):
 #     key = tuple(getattr(self,s) for s in self.__slots__)
 #     h = hash(type(self)) ^ hash(key)
@@ -182,7 +182,7 @@ class Input(Value):
   __slots__ = ('name',)
   def __init__(self, name):
     self.name = name
-  
+
   def args(self):
     return ()
 
@@ -449,7 +449,7 @@ class Constant(Value):
 class Symbol(Input, Constant):
   '''Symbolic constants.
   '''
-  
+
   def type_constraints(self, tcs):
     tcs.number(self)
 
@@ -587,7 +587,7 @@ class FunCnxp(Constant):
     self._args = args
 
   def pretty(self):
-    return pretty.pfun_(type(self).__name__, self._args)
+    return pretty.pfun(type(self).__name__, self._args)
 
   def args(self):
     return self._args
@@ -953,7 +953,7 @@ class IsExactPred(FunPred):
 
   type_constraints = _none
 
-class IntMinPred(FunPred): 
+class IntMinPred(FunPred):
   sig  = (Constant,)
   code = 'isSignBit'
 
