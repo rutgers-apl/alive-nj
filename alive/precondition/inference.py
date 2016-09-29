@@ -726,7 +726,7 @@ def infer_precondition(opt,
 
   while not valid:
     reporter.begin_round()
-    pre = infer_precondition_by_examples(config, goods, bads, features)
+    pre = infer_strong_precondition_by_examples(config, goods, bads, features)
 
     if log.isEnabledFor(logging.INFO):
       log.info('Inferred precondition:\n  ' + pformat(pre, indent=2))
@@ -817,10 +817,11 @@ class Reporter(object):
     self.status.flush()
 
   def clear_message(self):
-    self.status.write('\r')
-    self.status.write(' ' * self.width)
-    self.status.write('\r')
-    self.status.flush()
+    if self.status:
+      self.status.write('\r')
+      self.status.write(' ' * self.width)
+      self.status.write('\r')
+      self.status.flush()
 
   def test_cases(self, good, bad):
     self.num_good_cases = len(good)
