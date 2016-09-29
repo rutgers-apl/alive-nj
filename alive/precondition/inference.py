@@ -278,6 +278,91 @@ def negate_pred(pred):
 
   return L.NotPred(pred)
 
+
+
+
+def infer_strong_precondition_by_examples(config, goods, bads,
+    features=()):
+  """Synthesize a precondition which accepts some good examples and
+  rejects all bad examples.
+
+  features is None or an initial list of features; additional features
+  will be appended to this list.
+  """
+  log = logger.getChild('pie')
+
+  features = list(features)
+
+  log.info('Inferring: %s good, %s bad, %s features', len(goods),
+    len(bads), len(features))
+
+  feature_vectors = [((),goods,bads)]
+  for f in features:
+    feature_vectors = extend_feature_vectors(feature_vectors, f)
+
+    reporter.accept_feature()
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('Feature Vectors\n  ' +
+        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
+          indent=2))
+
+  while True:
+    # find the conflict set with the fewest bad instances
+    _,g,b = min((v for v in feature_vectors if v[1]), key=lambda v: v[2])
+
+    # if it has no bad ones, we're done
+    if not b:
+      break
+
+    # otherwise, sample
+    if len(g) + len(b) > CONFLICT_SET_CUTOFF:
+      x = random.randrange(
+            max(1, CONFLICT_SET_CUTOFF - len(b)),
+            min(CONFLICT_SET_CUTOFF, len(g)+1))
+
+      g = random.sample(g, x)
+      b = random.sample(b, CONFLICT_SET_CUTOFF - x)
+      assert len(g) + len(b) == CONFLICT_SET_CUTOFF
+
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('\n  good: ' + pformat(g, indent=8, start_at=8) +
+                '\n  bad:  ' + pformat(b, indent=8, start_at=8))
+
+    f, cache = learn_feature(config, g, b)
+    log.info('Feature %s: %s', len(features), f)
+
+    features.append(f)
+
+    feature_vectors = extend_feature_vectors(feature_vectors, f, cache)
+
+    reporter.accept_feature()
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('Feature Vectors\n  ' +
+        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
+          indent=2))
+
+  # pick the non-conflict vector with the most good instances
+  best = 0
+  good_vectors = [None]
+  bad_vectors = []
+  for v,g,b in feature_vectors:
+    if len(b):
+      bad_vectors.append(v)
+    elif len(g) > best:
+      log.debug('Best vector: %s', v)
+      best = len(g)
+      good_vectors[0] = v
+
+  clauses = learn_boolean(len(features), good_vectors, bad_vectors)
+
+  pre = mk_AndPred(
+          mk_OrPred(
+            negate_pred(features[l]) if l < 0 else features[l] for l in c)
+          for c in clauses)
+
+  return pre
+
+
 def infer_precondition_by_examples(config, goods, bads,
     features=()):
   """Synthesize a precondition which accepts the good examples and
