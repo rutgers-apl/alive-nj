@@ -14,6 +14,7 @@ import z3
 logger = logging.getLogger(__name__)
 
 CONFLICT_SET_CUTOFF = 16
+SAMPLES = 2
 
 def mk_implies(premises, consequent):
   if premises:
@@ -102,6 +103,38 @@ def learn_feature_1(config, good, bad):
         return pred, cache
 
 
+def dividing_features(samples, features):
+  """Examine features in the provided iterable and yield those which divide the
+  good and bad instances.
+  """
+  log = logger.getChild('dividing_features')
+
+  for pred in features:
+    reporter.consider_feature()
+    for good, bad in samples:
+      cache = {}
+      good_results = [0]*3
+      for g in good:
+        good_results[test_feature(pred, g, cache)] += 1
+
+      log.debug('Good Results: %s', good_results)
+
+      if good_results[UNSAFE] or \
+          (good_results[ACCEPT] and good_results[REJECT]):
+        continue
+
+      bad_results = [0]*3
+      for b in bad:
+        bad_results[test_feature(pred, b, cache)] += 1
+
+      log.debug('Bad Results: %s', bad_results)
+
+      if (good_results[ACCEPT] and not bad_results[ACCEPT]) or \
+          (good_results[REJECT] and not bad_results[REJECT]):
+        yield pred, cache
+        break
+
+
 def find_largest_conflict_set(vectors):
   largest = 0
   chosen = None
@@ -143,7 +176,23 @@ def sample_largest_conflict_set(vectors):
 
   return chosen
 
-find_conflict_set = sample_largest_conflict_set
+def sample_conflict_set(good, bad):
+  if len(good) + len(bad) <= CONFLICT_SET_CUTOFF:
+    return good, bad
+
+  x = random.randrange(
+    max(1, CONFLICT_SET_CUTOFF - len(bad)),
+    min(CONFLICT_SET_CUTOFF, len(good)+1)
+  )
+
+  g = random.sample(good, x)
+  b = random.sample(bad, CONFLICT_SET_CUTOFF - x)
+  assert len(g) + len(b) == CONFLICT_SET_CUTOFF
+
+  return g,b
+
+
+find_conflict_set = find_largest_conflict_set
 
 def partition(feature, cache, cases):
   partitions = [[],[],[]]
@@ -162,6 +211,12 @@ def extend_feature_vectors(vectors, feature, cache=None):
   for vector, good, bad in vectors:
     good_p = partition(feature, cache, good)
     bad_p = partition(feature, cache, bad)
+
+    # abort if the feature is unsafe for any good instance
+    if good_p[UNSAFE]:
+      return None
+    # NOTE: this is a conservative method to ensure the boolean learner can
+    #       find an expression
 
     for result in xrange(3):
       if good_p[result] or bad_p[result]:
@@ -298,7 +353,13 @@ def infer_strong_precondition_by_examples(config, goods, bads,
 
   feature_vectors = [((),goods,bads)]
   for f in features:
-    feature_vectors = extend_feature_vectors(feature_vectors, f)
+    new_vectors = extend_feature_vectors(feature_vectors, f)
+
+    if new_vectors is None:
+      log.info('Skipping feature %s', f)
+      continue
+
+    feature_vectors = new_vectors
 
     reporter.accept_feature()
     if log.isEnabledFor(logging.DEBUG):
@@ -316,26 +377,25 @@ def infer_strong_precondition_by_examples(config, goods, bads,
 
     # otherwise, sample
     if len(g) + len(b) > CONFLICT_SET_CUTOFF:
-      x = random.randrange(
-            max(1, CONFLICT_SET_CUTOFF - len(b)),
-            min(CONFLICT_SET_CUTOFF, len(g)+1))
-
-      g = random.sample(g, x)
-      b = random.sample(b, CONFLICT_SET_CUTOFF - x)
-      assert len(g) + len(b) == CONFLICT_SET_CUTOFF
+      samples = [sample_conflict_set(g, b) for _ in xrange(SAMPLES)]
+    else:
+      samples = [(g,b)]
 
     if log.isEnabledFor(logging.DEBUG):
-      log.debug('\n  good: ' + pformat(g, indent=8, start_at=8) +
-                '\n  bad:  ' + pformat(b, indent=8, start_at=8))
+      log.debug('samples:\n' + pformat(samples, prefix='    '))
 
-    f, cache = learn_feature(config, g, b)
-    log.info('Feature %s: %s', len(features), f)
+    generated_features = dividing_features(samples, enumerator.predicates(config))
+    new_vectors = None
+    while new_vectors is None:
+      f, cache = generated_features.next()
+      log.debug('Candidate feature\n%s', f)
+      new_vectors = extend_feature_vectors(feature_vectors, f, cache)
 
     features.append(f)
-
-    feature_vectors = extend_feature_vectors(feature_vectors, f, cache)
+    feature_vectors = new_vectors
 
     reporter.accept_feature()
+    log.info('Feature %s: %s', len(features), f)
     if log.isEnabledFor(logging.DEBUG):
       log.debug('Feature Vectors\n  ' +
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
@@ -380,7 +440,13 @@ def infer_precondition_by_examples(config, goods, bads,
 
   feature_vectors = [((),goods,bads)]
   for f in features:
-    feature_vectors = extend_feature_vectors(feature_vectors, f)
+    new_vectors = extend_feature_vectors(feature_vectors, f)
+
+    if new_vectors is None:
+      log.info('Skipping feature %s', f)
+      continue
+
+    feature_vectors = new_vectors
 
     reporter.accept_feature()
     if log.isEnabledFor(logging.DEBUG):
@@ -394,14 +460,25 @@ def infer_precondition_by_examples(config, goods, bads,
     if conflict is None:
       break
 
-    f, cache = learn_feature(config, conflict[0], conflict[1])
-    log.info('Feature %s: %s', len(features), f)
+    if len(conflict[0]) + len(conflict[1]) > CONFLICT_SET_CUTOFF:
+      samples = [sample_conflict_set(*conflict) for _ in xrange(SAMPLES)]
+    else:
+      samples = [conflict]
+
+    generated_features = dividing_features(
+      samples, enumerator.predicates(config)
+    )
+    new_vectors = None
+    while new_vectors is None:
+      f, cache = generated_features.next()
+      log.debug('Candidate feature\n%s', f)
+      new_vectors = extend_feature_vectors(feature_vectors, f, cache)
 
     features.append(f)
-
-    feature_vectors = extend_feature_vectors(feature_vectors, f, cache)
+    feature_vectors = new_vectors
 
     reporter.accept_feature()
+    log.info('Feature %s: %s', len(features), f)
     if log.isEnabledFor(logging.DEBUG):
       log.debug('Feature Vectors\n  ' +
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],

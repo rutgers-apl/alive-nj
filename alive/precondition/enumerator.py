@@ -2,6 +2,9 @@ from .. import language as L
 from .. import typing
 import itertools
 import collections
+import logging
+
+logger = logging.getLogger(__name__)
 
 Config = collections.namedtuple('Config', 'symbols type_reps model')
 # symbols:   maps tyvars to terms
@@ -68,26 +71,29 @@ def expressions(size, tyvar, config):
       if not s: continue
       yield set_type(L.Log2Cnxp(e), tyvar), tyvar == config.model.default_id
 
-def predicates(size, config):
+def predicates(config):
   tyvars = config.symbols.keys()
   tyvars.append(config.model.default_id)
 
   # enumerate comparisons
-  for lsize in xrange(1, (size-1)/2+1):
+  for size in itertools.count(3):
+    logger.info('Generating size %s', size)
+
+    for lsize in xrange(1, (size-1)/2+1):
+      for tyvar in tyvars:
+        for l,s1 in expressions(lsize, tyvar, config):
+          for r,s2 in expressions(size-lsize-1, tyvar, config):
+            if not (s1 or s2): continue
+
+            # TODO: avoid ult if tyvar is floating
+            for cmp in ['eq', 'ult', 'ugt', 'slt', 'sgt']: # sufficient?
+              yield L.Comparison(cmp, l, r)
+
+    # enumerate unary predicates
     for tyvar in tyvars:
-      for l,s1 in expressions(lsize, tyvar, config):
-        for r,s2 in expressions(size-lsize-1, tyvar, config):
-          if not (s1 or s2): continue
+      for e,s in expressions(size-3, tyvar, config):
+        if not s: continue
 
-          # TODO: avoid ult if tyvar is floating
-          for cmp in ['eq', 'ult', 'ugt', 'slt', 'sgt']: # sufficient?
-            yield L.Comparison(cmp, l, r)
-
-  # enumerate unary predicates
-  for tyvar in tyvars:
-    for e,s in expressions(size-3, tyvar, config):
-      if not s: continue
-
-      yield L.IntMinPred(e)
-      yield L.Power2Pred(e)
-      yield L.Power2OrZPred(e)
+        yield L.IntMinPred(e)
+        yield L.Power2Pred(e)
+        yield L.Power2OrZPred(e)
