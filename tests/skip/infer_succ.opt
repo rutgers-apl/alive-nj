@@ -1,0 +1,1092 @@
+Name: AddSub:1040
+Pre: C2 == ~C1
+%Y = or %Z, C2
+%X = xor %Y, C1
+%LHS = add %X, 1
+%r = add %LHS, %RHS
+=>
+%and = and %Z, C1
+%r = sub %RHS, %and
+; rounds 1
+; features in final round 1
+; total features generated 151
+
+; TODO: AddSub:1063 countTrailingZeros
+
+Name: AddSub:1088
+Pre: C == -C
+%a = add %x, C
+=>
+%a = xor %x, C
+; rounds 1
+; features in final round 1
+; total features generated 81
+
+
+Name: AddSub:1142
+Pre: C1 == -C1
+%b = xor %a, C1
+%d = add %b, C2
+=>
+%d = add %a, (C1 ^ C2)
+; rounds 1
+; features in final round 2
+; total features generated 147
+
+Name: AddSub:1156
+Pre: !1 == width(%a)
+%a = add %b, %b
+=>
+%a = shl %b, 1
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: AddSub:1156-2
+Pre: !1 == width(%a)
+%a = add nsw %b, %b
+=>
+%a = shl nsw %b, 1
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: AddSub:1156-3
+Pre: !1 == width(%a)
+%a = add nuw %b, %b
+=>
+%a = shl nuw %b, 1
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: AddSub:1206
+Pre: (C2 == (C2 | C1) && C2 == (C2 | -C1))
+%xc2 = and %x, C2
+%r = add %xc2, C1
+=>
+%xc1 = add %x, C1
+%r = and %xc1, C2
+; rounds 1
+; features in final round 3
+; total features generated 14,084
+
+; locks up generating test cases for i33
+Name: AddSub:1549
+Pre: (C != -C || C == 0)
+%r = sub nsw i11 %x, C
+=>
+%r = add nsw %x, -C
+; rounds 1
+; features in final round 2
+; total features generated 87
+
+Name: AddSub:1599
+Pre: C == (-1 + width(%r))
+%a = lshr %x, C
+%r = sub 0, %a
+=>
+%r = ashr %x, C
+; rounds 1
+; features in final round 1
+; total features generated 272
+
+Name: AddSub:1604
+Pre: C == (-1 + width(%r))
+%a = ashr %x, C
+%r = sub 0, %a
+=>
+%r = lshr %x, C
+; rounds 1
+; features in final round 1
+; total features generated 272
+
+Name: <stdin>#1:<stdin>#1:AddSub:1660
+Pre: (!isPowerOf2(C) || C > 1)
+%Op1 = sdiv i9 %X, C
+%r = sub 0, %Op1
+=>
+%r = sdiv %X, -C
+; rounds 1
+; features in final round 2
+; total features generated 187
+
+
+Name: AndOrXor:151
+Pre: C1 == (C1 & C2)
+%op = or %X, C1
+%r = and %op, C2
+=>
+%a = and %X, (C2 ^ (C1 & C2))
+%r = or %a, C1
+
+Name: AndOrXor:185
+Pre: (C2 u< (C1 & -C1) || C1 == 0)
+%op = add %X, C1
+%r = and %op, C2
+=>
+%r = and %X, C2
+
+Name: AndOrXor:190
+Pre: ((C1 == C2 || C1 == (C1 | C2)) && isPowerOf2OrZero(C2) && (!isPowerOf2(C2) || C1 == C2 || C1 u> (C1 % -C2)))
+%op = add %X, C1
+%r = and %op, C2
+=>
+%a = and %X, C2
+%r = xor %a, C2
+
+Name: AndOrXor:206
+Pre: !C2 u< (-1 << C1)
+%op = shl %X, C1
+%r = and %op, C2
+=>
+%r = shl %X, C1
+
+Name: AndOrXor:210
+%op = shl %X, C1
+%r = and %op, C2
+=>
+%r = and %op, (C2 & (-1 << C1))
+
+Name: AndOrXor:226
+Pre: !C1 u< (~C2 << C1)
+%op = lshr %X, C1
+%r = and %op, C2
+=>
+%r = lshr %X, C1
+
+Name: AndOrXor:246
+Pre: ((!C2 u> 1 || isPowerOf2((width(%r) >> C1))) && (!isPowerOf2(C1) || C2 u< width(%r) || C1 == 1) && (!C1 u< (C2 >> C1) || C1 == C2 || isPowerOf2OrZero(C1)) && (!C1 == 1 || !C1 u< (C2 >> C1) || C1 < C2))
+%op = ashr %X, C1
+%r = and %op, C2
+=>
+%op. = lshr %X, C1
+%r = and %op., C2
+
+Name: AndOrXor:270
+Pre: !C1 < C2
+%c1 = icmp sge %X, C1
+%c2 = icmp slt %X, C2
+%r = and %c1, %c2
+=>
+%r = 0
+
+; Weaker
+Name: AndOrXor:273
+Pre: (isSignBit(C1) || isSignBit(C2))
+%c1 = icmp sge %X, C1
+%c2 = icmp slt %X, C2
+%r = and %c1, %c2
+=>
+%r = icmp slt %X, C2
+
+Name: AndOrXor:280
+Pre: (C1 == C2 || C1 < C2)
+%c1 = icmp sge %X, C1
+%c2 = icmp slt %X, C2
+%r = and %c1, %c2
+=>
+%a = add %X, -C1
+%r = icmp ult %a, (-C1 + C2)
+
+; Weaker
+Name: AndOrXor:287
+Pre: !C1 < C2
+%c1 = icmp slt %X, C1
+%c2 = icmp sge %X, C2
+%r = or %c1, %c2
+=>
+%r = 1
+
+Name: AndOrXor:290
+Pre: (isSignBit(C1) && !C1 == C2)
+%c1 = icmp slt %X, C1
+%c2 = icmp sge %X, C2
+%r = or %c1, %c2
+=>
+%r = icmp sgt %X, (C2 - 1)
+
+Name: AndOrXor:298
+Pre: C1 < C2
+%c1 = icmp slt %X, C1
+%c2 = icmp sge %X, C2
+%r = or %c1, %c2
+=>
+%a = add %X, -C1
+%r = icmp ugt %a, (-C1 + (C2 - 1))
+
+Name: AndOrXor:363
+Pre: (C1 == 0 || C2 u< (C1 & -C1))
+%lhs = or %A, C1
+%Op = add %lhs, %B
+%r = and %Op, C2
+=>
+%op = add %A, %B
+%r = and %op, C2
+
+Name: AndOrXor:364
+Pre: (C2 u< (C1 & -C1) || C1 == 0)
+%lhs = xor %A, C1
+%Op = sub %lhs, %B
+%r = and %Op, C2
+=>
+%op = sub %A, %B
+%r = and %op, C2
+
+Name: AndOrXor:530
+Pre: isPowerOf2(C)
+%r = icmp ult %X, C
+=>
+%a = and %X, -C
+%r = icmp eq %a, 0
+
+Name: AndOrXor:537
+Pre: (C == -1 || isPowerOf2((C + width(%r))))
+%r = icmp ugt %X, C
+=>
+%a = and %X, ~C
+%r = icmp ne %a, 0
+
+Name: AndOrXor:732-1
+Pre: C1 == (C1 & C2)
+%a1 = and %a, C1
+%op0 = icmp ne %a1, 0
+%a2 = and %a, C2
+%op1 = icmp ne %a2, 0
+%r = and %op0, %op1
+=>
+%r = icmp ne %a1, 0
+
+Name: AndOrXor:732-2
+Pre: C1 == (C1 & C2)
+%a1 = and %a, C1
+%op0 = icmp ne %a1, C1
+%a2 = and %a, C2
+%op1 = icmp ne %a2, C2
+%r = and %op0, %op1
+=>
+%r = icmp ne %a1, C1
+
+Name: AndOrXor:745
+Pre: C1 == (C1 | C2)
+%a1 = and %a, C1
+%op0 = icmp ne %a1, %a
+%a2 = and %a, C2
+%op1 = icmp ne %a2, %a
+%r = and %op0, %op1
+=>
+%r = icmp ne %a1, %a
+
+
+; skip AndOrXor:757
+
+Name: AndOrXor:819
+Pre: (isPowerOf2(C) || C u< width(%r))
+%op0 = icmp ult %a, C
+%op1 = icmp ult %b, C
+%r = and %op0, %op1
+=>
+%o = or %a, %b
+%r = icmp ult %o, C
+
+; skip AndOrXor:842
+
+Name: AndOrXor:887-1
+Pre: !C1 == C2
+%op0 = icmp eq %a, C1
+%op1 = icmp eq %a, C2
+%r = and %op0, %op1
+=>
+%r = 0
+
+Name: AndOrXor:922
+Pre: !C1 == C2
+%op0 = icmp eq %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C1
+
+Name: AndOrXor:923
+Pre: C1 u< C2
+%op0 = icmp eq %a, C1
+%op1 = icmp ult %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C1
+
+Name: AndOrXor:924
+Pre: C1 < C2
+%op0 = icmp eq %a, C1
+%op1 = icmp slt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C1
+
+Name: AndOrXor:931
+Pre: ((C1 == C2 || C1 == (C2 - width(%r))) && (!C1 == (C2 - width(%r)) || C1 u< C2))
+%op0 = icmp ne %a, C1
+%op1 = icmp ult %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ult %a, C1
+
+Name: AndOrXor:937
+Pre: ((C1 == C2 || C1 == (C2 - width(%r))) && (C1 == C2 || C1 < C2))
+%op0 = icmp ne %a, C1
+%op1 = icmp slt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp slt %a, C1
+
+Name: AndOrXor:940
+Pre: !C1 == C2
+%op0 = icmp ne %a, C1
+%op1 = icmp eq %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C2
+
+Name: AndOrXor:941
+Pre: (C1 == C2 || C1 u< C2)
+%op0 = icmp ne %a, C1
+%op1 = icmp ugt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ugt %a, C2
+
+Name: AndOrXor:942
+Pre: (C1 == C2 || C1 < C2)
+%op0 = icmp ne %a, C1
+%op1 = icmp sgt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp sgt %a, C2
+
+Name: AndOrXor:949
+Pre: C1 == (C2 - width(%r))
+%op0 = icmp ne %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%s = add %a, -C1
+%r = icmp ugt %s, 1
+
+Name: AndOrXor:961
+Pre: (C1 == C2 || C1 u< C2)
+%op0 = icmp ult %a, C1
+%op1 = icmp eq %a, C2
+%r = and %op0, %op1
+=>
+%r = 0
+
+                                                                                                     
+Name: AndOrXor:962
+Pre: (C1 == C2 || C1 u< C2 || C1 == (C2 + width(%r)))
+%op0 = icmp ult %a, C1
+%op1 = icmp ugt %a, C2
+%r = and %op0, %op1
+=>
+%r = 0
+                                                                                                     
+Name: AndOrXor:966
+Pre: (C1 == C2 || C1 u< C2)
+%op0 = icmp ult %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ult %a, C1
+                                                                                                     
+Name: AndOrXor:967
+Pre: (C1 == C2 || C1 u< C2)
+%op0 = icmp ult %a, C1
+%op1 = icmp ult %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ult %a, C1
+
+
+Name: AndOrXor:978
+Pre: !C1 > C2
+%op0 = icmp slt %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp slt %a, C1
+; rounds 1
+; features in final round 1
+; total features generated 10
+
+Name: AndOrXor:979
+Pre: (C1 < C2 || C1 == C2)
+%op0 = icmp slt %a, C1
+%op1 = icmp slt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp slt %a, C1
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: AndOrXor:988
+Pre: C1 u< C2
+%op0 = icmp ugt %a, C1
+%op1 = icmp eq %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C2
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: AndOrXor:989
+Pre: (C1 u< C2 || C1 == C2)
+%op0 = icmp ugt %a, C1
+%op1 = icmp ugt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ugt %a, C2
+; rounds 1
+; features in final round 2
+; total features generated 13
+
+Name: AndOrXor:994
+Pre: (!1 u< (C2 - C1) && !C1 u> C2)
+%op0 = icmp ugt %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp ugt %a, C2
+; rounds 1
+; features in final round 3
+; total features generated 8579
+
+Name: AndOrXor:1006
+Pre: C1 < C2
+%op0 = icmp sgt %a, C1
+%op1 = icmp eq %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp eq %a, C2
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: AndOrXor:1007
+Pre: (C1 < C2 || C1 == C2)
+%op0 = icmp sgt %a, C1
+%op1 = icmp sgt %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp sgt %a, C2
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: AndOrXor:1012
+Pre: (!C1 > C2 && (!C1 < (C2 + -1) || C1 == C2))
+%op0 = icmp sgt %a, C1
+%op1 = icmp ne %a, C2
+%r = and %op0, %op1
+=>
+%r = icmp sgt %a, C2
+; rounds 1
+; features in final round 5
+; total features generated 2411
+
+; skip AndOrXor:1628-1
+; skip AndOrXor:1628-2
+
+Name: AndOrXor:1740
+Pre: C3 == (C1 - C2)
+%add = add %X, C3
+%cmp1 = icmp ult %add, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ule %add, C1
+; rounds 1
+; features in final round 1
+; total features generated 1001
+
+; strength.py confirms this is weakest correct precondition
+Name: AndOrXor:1795
+Pre: (C1 == (C1 & C2) && isPowerOf2OrZero((C2 - C1)))
+%cmp1 = icmp eq %X, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%a = and %X, ~(C1 ^ C2)
+%r = icmp eq %a, C1
+; rounds 1
+; features in final round 3
+; total features generated 120088
+
+Name: <stdin>#1:AndOrXor:1806
+Pre: C1 == (C2 + -1)
+%cmp1 = icmp eq %X, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%a = add %X, -C1
+%r = icmp ult %a, 2
+; rounds 1
+; features in final round 1
+; total features generated 508
+
+Name: AndOrXor:1818
+Pre: !C1 == C2
+%cmp1 = icmp eq %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C2
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: AndOrXor:1819
+Pre: C1 u< C2
+%cmp1 = icmp eq %X, C1
+%cmp2 = icmp ult %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ult %X, C2
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: AndOrXor:1820
+Pre: C1 < C2
+%cmp1 = icmp eq %X, C1
+%cmp2 = icmp slt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp slt %X, C2
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: AndOrXor:1827
+Pre: !C1 == C2
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C1
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: <stdin>#1:AndOrXor:1828
+Pre: (C1 u< C2 || C1 == C2)
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp ugt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 13
+
+Name: <stdin>#2:AndOrXor:1829
+Pre: (C1 < C2 || C1 == C2)
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp sgt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: <stdin>#3:AndOrXor:1831
+Pre: !C1 == C2
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 6
+
+Name: <stdin>#4:AndOrXor:1832
+Pre: C1 u< C2
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp ult %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: <stdin>#5:AndOrXor:1833
+Pre: C1 < C2
+%cmp1 = icmp ne %X, C1
+%cmp2 = icmp slt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: AndOrXor:1844
+Pre: C2 == -1
+%cmp1 = icmp ult %X, C1
+%cmp2 = icmp ugt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ult %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 105
+
+Name: AndOrXor:1849
+Pre: (C1 u< C2 || C1 == C2)
+%cmp1 = icmp ult %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C2
+; rounds 1
+; features in final round 2
+; total features generated 13
+
+Name: AndOrXor:1850
+Pre: (C1 u< C2 || C1 == C2)
+%cmp1 = icmp ult %X, C1
+%cmp2 = icmp ult %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ult %X, C2
+; rounds 1
+; features in final round 2
+; total features generated 13
+
+
+Name: AndOrXor:1864
+Pre: !C2 < (C2 + 1)
+%cmp1 = icmp slt %X, C1
+%cmp2 = icmp sgt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp slt %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 4,639
+
+Name: AndOrXor:1869
+Pre: !C1 > C2
+%cmp1 = icmp slt %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ne %X, C2
+; rounds 1
+; features in final round 1
+; total features generated 10
+
+Name: AndOrXor:1870
+Pre: (C1 < C2 || C1 == C2)
+%cmp1 = icmp slt %X, C1
+%cmp2 = icmp slt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp slt %X, C2
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: AndOrXor:1879
+Pre: C1 u< C2
+%cmp1 = icmp ugt %X, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ugt %X, C1
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: AndOrXor:1880
+Pre: (C1 u< C2 || C1 == C2)
+%cmp1 = icmp ugt %X, C1
+%cmp2 = icmp ugt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp ugt %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 13
+
+Name: AndOrXor:1884
+Pre: C1 u< C2
+%cmp1 = icmp ugt %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: AndOrXor:1885
+Pre: C1 u< C2
+%cmp1 = icmp ugt %X, C1
+%cmp2 = icmp ult %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: AndOrXor:1894
+Pre: C1 < C2
+%cmp1 = icmp sgt %X, C1
+%cmp2 = icmp eq %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp sgt %X, C1
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: AndOrXor:1895
+Pre: (C1 < C2 || C1 == C2)
+%cmp1 = icmp sgt %X, C1
+%cmp2 = icmp sgt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = icmp sgt %X, C1
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: AndOrXor:1899
+Pre: C1 < C2
+%cmp1 = icmp sgt %X, C1
+%cmp2 = icmp ne %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: AndOrXor:1900
+Pre: C1 < C2
+%cmp1 = icmp sgt %X, C1
+%cmp2 = icmp slt %X, C2
+%r = or %cmp1, %cmp2
+=>
+%r = 1
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: <stdin>#1:AndOrXor:1979
+Pre: -1 == (C1 | C2)
+%or = or %A, %B
+%op0 = and %or, C1
+%op1 = and %B, C2
+%r = or %op0, %op1
+=>
+%a = and %A, C1
+%r = or %a, %B
+; rounds 1
+; features in final round 3
+; total features generated 11,508
+
+; NOTE: added type constraint to avoid intermittent slowdown
+Name: AndOrXor:1979
+Pre: -1 == (C1 | C2)
+%or = or i11 %A, %B
+%op0 = and %or, C1
+%op1 = and %B, C2
+%r = or %op0, %op1
+=>
+%a = and %A, C1
+%r = or %a, %B
+; rounds 1
+; features in final round 1
+; total features generated 7,890
+
+; NOTE: added type constraint to avoid intermittent slowdown
+Name: AndOrXor:2008
+Pre: C1 == ~C2
+%or = xor i11 %A, %B
+%op0 = and %or, C1
+%op1 = and %B, C2
+%r = or %op0, %op1
+=>
+%a = and %A, C1
+%r = xor %a, %B
+; rounds 1
+; features in final round 1
+; total features generated 151
+
+; skip AndOrXor:2160
+
+Name: AndOrXor:2494
+Pre: C1 == -C1
+%op0 = add %x, C
+%r = xor %op0, C1
+=>
+%r = add %x, (C + C1)
+; rounds 1
+; features in final round 1
+; total features generated 161
+
+Name: 168
+Pre: isPowerOf2(C1)
+%r = mul i11 %x, C1
+=>
+%r = shl %x, log2(C1)
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+Name: 168-2
+Pre: isPowerOf2(C1)
+%r = mul nuw i11 %x, C1
+=>
+%r = shl nuw %x, log2(C1)
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+; NOTE: added type constraint to avoid intermittent slowdown
+Name: 201
+Pre: (C < 0 || C == 0)
+%Op0 = sub i9 %Y, %X
+%r = mul %Op0, C
+=>
+%sub = sub %X, %Y
+%r = mul %sub, abs(C)
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+; NOTE: added type constraint to avoid intermittent slowdown
+Name: 203
+Pre: (C < 0 || C == 0)
+%Op0 = add i9 %Y, C1
+%r = mul %Op0, C
+=>
+%sub = sub -C1, %Y
+%r = mul %sub, abs(C)
+; rounds 1
+; features in final round 2
+; total features generated 85
+
+; TODO: muldivrem.opt: 735
+; TODO: muldivrem.opt: 735
+
+Name: 748
+Pre: 0 == (C2 % C1)
+%m = mul nsw i7 %X, C1
+%r = sdiv %m, C2
+=>
+%r = sdiv %X, (C2 / C1)
+; rounds 1
+; features in final round 1
+; total features generated 5,915
+
+; skip 748
+
+Name: 748
+Pre: 0 == (C2 %u C1)
+%m = mul nuw i7 %X, C1
+%r = udiv %m, C2
+=>
+%r = udiv %X, (C2 /u C1)
+; rounds 1
+; features in final round 2
+; total features generated 6,023
+
+; skip 748
+
+; skip 756
+; skip 756
+; skip 756
+
+; too strong
+Name: 764
+Pre: (C1 == (1 & ~C2) || C1 == 0)
+%s = shl nsw i9 %X, C1
+%r = sdiv %s, C2
+=>
+%r = sdiv %X, (C2 / (1 << C1))
+; rounds 1
+; features in final round 2
+; total features generated 13,034
+
+; skip 764
+; skip 764
+; skip 764
+
+; skip 772
+; skip 772
+; skip 772
+
+Name: 865
+Pre: isPowerOf2(C)
+%r = udiv i9 %x, C
+=>
+%r = lshr %x, log2(C)
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+Name: 865
+Pre: isPowerOf2(C)
+%r = udiv exact i9 %x, C
+=>
+%r = lshr exact %x, log2(C)
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+Name: 876
+Pre: C < 0  ; i.e, x >= int_min
+%r = udiv %x, C
+=>
+%c = icmp ult %x, C
+%r = select %c, 0, 1
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: 891-2
+Pre: isPowerOf2(C)
+%s = shl i13 C, %N
+%r = udiv %x, %s
+=>
+%N2 = add %N, log2(C)
+%r = lshr %x, %N2
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+Name: 891-2
+Pre: isPowerOf2(C)
+%s = shl i13 C, %N
+%r = udiv exact %x, %s
+=>
+%N2 = add %N, log2(C)
+%r = lshr exact %x, %N2
+; rounds 1
+; features in final round 1
+; total features generated 172
+
+Name: 891-3
+Pre: isPowerOf2(C)
+%s = shl C, %N
+%Op1 = zext %s
+%r = udiv i13 %x, %Op1
+=>
+%N2 = add %N, log2(C)
+%N3 = zext %N2
+%r = lshr %x, %N3
+; rounds 1
+; features in final round 1
+; total features generated 297
+
+Name: 891-3
+Pre: isPowerOf2(C)
+%s = shl C, %N
+%Op1 = zext %s
+%r = udiv exact i13 %x, %Op1
+=>
+%N2 = add %N, log2(C)
+%N3 = zext %N2
+%r = lshr exact %x, %N3
+; rounds 1
+; features in final round 1
+; total features generated 297
+
+; TODO: 968
+
+Name: 1045
+Pre: C == -C
+%r = sdiv %Op0, C
+=>
+%cmp = icmp eq %Op0, C
+%r = zext %cmp
+; rounds 1
+; features in final round 1
+; total features generated 81
+
+Name: 1321
+Pre: C != 1
+%r = srem i11 %Op0, C
+=>
+%r = srem %Op0, -C
+; rounds 1
+; features in final round 1
+; total features generated 11
+
+
+Name: Select:420
+Pre: ((C1 == C2 || C1 == 0) && (C1 == 0 || isPowerOf2(C1)))
+%and = and %X, C1
+%c = icmp eq %and, 0
+%F = xor %X, C2
+%r = select %c, %X, %F
+=>
+%r = and %X, ~C1
+; rounds 1
+; features in final round 3
+; total features generated 459
+
+Name: Select:423
+Pre: -1 == (C1 | C2)
+%and = and %X, C1
+%c = icmp eq %and, 0
+%F = and %X, C2
+%r = select %c, %X, %F
+=>
+%r = and %X, C2
+; rounds 1
+; features in final round 1
+; total features generated 10,308
+
+Name: Select:427
+Pre: (C1 == C2 && (isPowerOf2(C2) || C1 == 0))
+%and = and %X, C1
+%c = icmp eq %and, 0
+%T = xor %X, C2
+%r = select %c, %T, %X
+=>
+%r = or %X, C1
+; rounds 1
+; features in final round 3
+; total features generated 462
+
+Name: Select:430
+Pre: -1 == (C1 | C2)
+%and = and %X, C1
+%c = icmp eq %and, 0
+%T = and %X, C2
+%r = select %c, %T, %X
+=>
+%r = %X
+; rounds 1
+; features in final round 1
+; total features generated 10,308
+
+Name: <stdin>#4:Select:433
+Pre: ((C1 u<= (C2 / C2) || C1 == C2) && (C1 u<= (C2 / C2) || isPowerOf2(C1)) && (0 == (C1 * C2) || C1 == C2))
+%and = and %X, C1
+%c = icmp eq %and, 0
+%T = or %X, C2
+%r = select %c, %T, %X
+=>
+%r = or %X, C2
+; rounds 1
+; features in final round 6
+; total features generated 10,316

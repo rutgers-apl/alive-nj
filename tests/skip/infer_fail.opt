@@ -1,0 +1,157 @@
+; 11% of good samples accepted
+Name: AndOrXor:757
+Pre: (C1 & C3) & (C2 ^ C4) == 0 && C1 & C2 == C2 && C3 & C4 == C4
+%a1 = and %a, C1
+%a2 = and %a, C3
+%op0 = icmp eq %a1, C2
+%op1 = icmp eq %a2, C4
+%r = and %op0, %op1
+  =>
+%a3 = and %a, C1|C3
+%r = icmp eq %a3, C2|C4
+
+
+; 4% of good samples accepted
+Name: AndOrXor:842
+Pre: ((1 << width(C1))-1) & C3 == 0 && ((1 << width(C1))-1) & C2 == 0
+%t = trunc %x to i11
+%op0 = icmp eq %t, C1
+%a1 = and %x, C3
+%op1 = icmp eq %a1, C2
+%r = and %op0, %op1
+  =>
+%a2 = and %x, C3 | ((1 << width(C1))-1)
+%r = icmp eq %a2, zext(C1) | C2
+
+; 0% of good samples accepted
+Name: AndOrXor:1628-1
+Pre: C1 u> C3 && C2 u> C3 && isPowerOf2(C1 ^ C2) && isPowerOf2(-C2 ^ -C1) && -C2 ^ -C1 == (C3-C2) ^ (C3-C1) && abs(C1-C2) u> C3
+%a1 = add i29 %A, C1
+%a2 = add %A, C2
+%cmp1 = icmp ult %a1, C3
+%cmp2 = icmp ult %a2, C3
+%r = or %cmp1, %cmp2
+  =>
+%newand = and %A, ~(C1^C2)
+%newadd = add %newand, umax(C1, C2)
+%r = icmp ult %newadd, C3
+
+; 2% of good samples accepted
+Name: AndOrXor:1628-2
+Pre: C1 u> C3 && C2 u> C3 && isPowerOf2(C1 ^ C2) && isPowerOf2(-C2 ^ -C1) && -C2 ^ -C1 == (C3-C2) ^ (C3-C1) && abs(C1-C2) u> C3
+%a1 = add i29 %A, C1
+%a2 = add %A, C2
+%cmp1 = icmp ule %a1, C3
+%cmp2 = icmp ule %a2, C3
+%r = or %cmp1, %cmp2
+  =>
+%newand = and %A, ~(C1^C2)
+%newadd = add %newand, umax(C1, C2)
+%r = icmp ule %newadd, C3
+
+; 8% of good samples accepted
+Name: AndOrXor:2160
+Pre: C1 & C2 == 0 && C3 & ~C1 == 0 && C4 & ~C2 == 0
+%A = or %V1, C3
+%B = or %V1, C4
+%op0 = and %A, C1
+%op1 = and %B, C2
+%r = or %op0, %op1
+  =>
+%V2 = or %V1, (C3 | C4)
+%r = and %V2, (C1 | C2)
+
+; 17% of good samples accepted
+Name: 748
+Pre: C2 % C1 == 0
+%m = mul nsw i7 %X, C1
+%r = sdiv exact %m, C2
+  =>
+%r = sdiv exact %X, C2/C1
+
+; 11% of good samples accepted
+Name: 748
+Pre: C2 %u C1 == 0
+%m = mul nuw i7 %X, C1
+%r = udiv exact %m, C2
+  =>
+%r = udiv exact %X, C2 /u C1
+
+; 20% of good samples accepted
+Name: 756
+; FIXME: merge the following 3
+Pre: C1 % C2 == 0
+%m = mul nsw i7 %X, C1
+%r = sdiv %m, C2
+  =>
+%r = mul nsw %X, C1/C2
+
+; 10% of good samples accepted
+Name: 756
+Pre: C1 %u C2 == 0
+%m = mul nuw i7 %X, C1
+%r = udiv %m, C2
+  =>
+%r = mul nuw %X, C1/u C2
+
+; 8% of good samples accepted
+Name: 756
+Pre: C1 %u C2 == 0
+%m = mul nuw nsw i7 %X, C1
+%r = udiv %m, C2
+  =>
+%r = mul nuw nsw %X, C1/u C2
+
+; 62% of good samples accepted
+Name: 764
+; FIXME: slow
+Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
+%s = shl nsw i7 %X, C1
+%r = sdiv exact %s, C2
+  =>
+%r = sdiv exact %X, C2/(1<<C1)
+
+; 100% of good samples accepted
+Name: 764
+; FIXME: slow
+Pre: C2 %u (1<<C1) == 0
+%s = shl nuw i9 %X, C1
+%r = udiv %s, C2
+  =>
+%r = udiv %X, C2/u (1<<C1)
+
+
+; 61% of good samples accepted
+Name: 764
+; FIXME: slow
+Pre: C2 %u (1<<C1) == 0
+%s = shl nuw i7 %X, C1
+%r = udiv exact %s, C2
+  =>
+%r = udiv exact %X, C2/u (1<<C1)
+
+; 92% of good samples accepted
+Name: 772
+; FIXME: slow
+; FIXME: merge the following 3
+Pre: (1<<C1) % C2 == 0 && C1 != width(C1)-1
+%s = shl nsw i9 %X, C1
+%r = sdiv %s, C2
+  =>
+%r = mul nsw %X, (1<<C1)/C2
+
+; 91% of good samples accepted
+Name: 772
+Pre: (1<<C1) %u C2 == 0
+%s = shl nuw i9 %X, C1
+%r = udiv %s, C2
+  =>
+%r = mul nuw %X, (1<<C1) /u C2
+
+; 18% of good samples accepted
+Name: 772
+Pre: (1<<C1) %u C2 == 0
+%s = shl nsw nuw i9 %X, C1
+%r = udiv %s, C2
+  =>
+%r = mul nsw nuw %X, (1<<C1) /u C2
