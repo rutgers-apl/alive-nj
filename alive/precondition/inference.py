@@ -14,7 +14,7 @@ import z3
 logger = logging.getLogger(__name__)
 
 CONFLICT_SET_CUTOFF = 16
-SAMPLES = 2
+SAMPLES = 5
 
 def mk_implies(premises, consequent):
   if premises:
@@ -50,59 +50,6 @@ def test_feature(pred, test_case, cache):
 
   return REJECT
 
-def learn_feature(config, good, bad):
-  log = logger.getChild('learn_feature')
-  for size in itertools.count(3):
-    log.info('Checking size %s', size)
-    for pred in enumerator.predicates(size, config):
-      log.debug('Checking %s', pred)
-      reporter.consider_feature()
-
-      cache = {}
-      good_results = [0]*3
-      for g in good:
-        good_results[test_feature(pred, g, cache)] += 1
-
-      log.debug('Good Results: %s', good_results)
-
-      if good_results[UNSAFE] or \
-          (good_results[ACCEPT] and good_results[REJECT]):
-        continue
-
-      bad_results = [0]*3
-      for b in bad:
-        bad_results[test_feature(pred, b, cache)] += 1
-
-      log.debug('Bad Results: %s', bad_results)
-
-      if (good_results[ACCEPT] and not bad_results[ACCEPT]) or \
-          (good_results[REJECT] and not bad_results[REJECT]):
-        return pred, cache
-
-def learn_feature_1(config, good, bad):
-  log = logger.getChild('learn_feature')
-  threshold = min(CONFLICT_SET_CUTOFF, len(good)+len(bad))
-  for size in itertools.count(3):
-    log.info('Checking size %s', size)
-    for pred in enumerator.predicates(size, config):
-      log.debug('Checking %s', pred)
-      reporter.consider_feature()
-
-      cache = {}
-      good_accept = sum(1 for g in good if test_feature(pred, g, cache))
-      good_reject = len(good) - good_accept
-      bad_accept  = sum(1 for b in bad if test_feature(pred, b, cache))
-      bad_reject  = len(bad) - bad_accept
-
-      log.debug('Accepted: %s good, %s bad', good_accept, bad_accept)
-
-      if (good_accept + bad_reject >= threshold and
-            min(good_accept, bad_reject) > 0) or \
-          (good_reject + bad_accept >= threshold and
-            min(good_reject, bad_accept) > 0):
-        return pred, cache
-
-
 def dividing_features(samples, features):
   """Examine features in the provided iterable and yield those which divide the
   good and bad instances.
@@ -134,47 +81,25 @@ def dividing_features(samples, features):
         yield pred, cache
         break
 
-
-def find_largest_conflict_set(vectors):
-  largest = 0
+def find_conflict_set(vectors, key):
+  best = 0
   chosen = None
 
   for _,g,b in vectors:
     if not g or not b: continue
 
-    size = len(g) + len(b)
-    if size > largest:
-      largest = size
+    val = key(len(g),len(b))
+    if val > best or chosen is None:
+      best = val
       chosen = (g,b)
-
-  log = logger.getChild('find_largest_conflict_set')
-  if chosen and log.isEnabledFor(logging.DEBUG):
-    log.debug('\n  good: ' + pformat(chosen[0], indent=8, start_at=8) +
-              '\n  bad:  ' + pformat(chosen[1], indent=8, start_at=8))
 
   return chosen
 
-def sample_largest_conflict_set(vectors):
-  chosen = find_largest_conflict_set(vectors)
+find_largest_conflict_set = lambda v: find_conflict_set(v, lambda g,b: g+b)
+find_smallest_conflict_set = lambda v: find_conflict_set(v, lambda g,b: -g-b)
+find_most_positive_conflict_set = lambda v: find_conflict_set(v, lambda g,b: g)
+find_least_negative_conflict_set = lambda v: find_conflict_set(v,lambda g,b: -b)
 
-  if chosen:
-    g,b = chosen
-    if len(g) + len(b) > CONFLICT_SET_CUTOFF:
-      x = random.randrange(
-            max(1, CONFLICT_SET_CUTOFF - len(b)),
-            min(CONFLICT_SET_CUTOFF, len(g)+1))
-
-      g = random.sample(g, x)
-      b = random.sample(b, CONFLICT_SET_CUTOFF - x)
-      assert len(g) + len(b) == CONFLICT_SET_CUTOFF
-      chosen = (g,b)
-
-    log = logger.getChild('sample_largest_conflict_set')
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('\n  good: ' + pformat(g, indent=8, start_at=8) +
-                '\n  bad:  ' + pformat(b, indent=8, start_at=8))
-
-  return chosen
 
 def sample_conflict_set(good, bad):
   if len(good) + len(bad) <= CONFLICT_SET_CUTOFF:
@@ -191,8 +116,6 @@ def sample_conflict_set(good, bad):
 
   return g,b
 
-
-find_conflict_set = find_largest_conflict_set
 
 def partition(feature, cache, cases):
   partitions = [[],[],[]]
@@ -334,86 +257,24 @@ def negate_pred(pred):
   return L.NotPred(pred)
 
 
+def make_precondition(features, feature_vectors, incomplete):
+  """Return an expression which is true for the positive feature vectors.
 
-
-def infer_strong_precondition_by_examples(config, goods, bads,
-    features=()):
-  """Synthesize a precondition which accepts some good examples and
-  rejects all bad examples.
-
-  features is None or an initial list of features; additional features
-  will be appended to this list.
+  incomplete - require success only for the most positive vector
   """
-  log = logger.getChild('pie')
 
-  features = list(features)
+  if incomplete:
+    pos_vecs = filter(lambda v: not v[2], feature_vectors)
+    best_vec = max(pos_vecs, key=lambda v: len(v[1]))
+    pos_vecs = [best_vec[0]]
+  else:
+    pos_vecs = [v[0] for v in feature_vectors if not v[2]]
 
-  log.info('Inferring: %s good, %s bad, %s features', len(goods),
-    len(bads), len(features))
+  neg_vecs = [v[0] for v in feature_vectors if v[2]]
 
-  feature_vectors = [((),goods,bads)]
-  for f in features:
-    new_vectors = extend_feature_vectors(feature_vectors, f)
+  logger.getChild('pie').debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
 
-    if new_vectors is None:
-      log.info('Skipping feature %s', f)
-      continue
-
-    feature_vectors = new_vectors
-
-    reporter.accept_feature()
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('Feature Vectors\n  ' +
-        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
-          indent=2))
-
-  while True:
-    # find the conflict set with the fewest bad instances
-    _,g,b = min((v for v in feature_vectors if v[1]), key=lambda v: v[2])
-
-    # if it has no bad ones, we're done
-    if not b:
-      break
-
-    # otherwise, sample
-    if len(g) + len(b) > CONFLICT_SET_CUTOFF:
-      samples = [sample_conflict_set(g, b) for _ in xrange(SAMPLES)]
-    else:
-      samples = [(g,b)]
-
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('samples:\n' + pformat(samples, prefix='    '))
-
-    generated_features = dividing_features(samples, enumerator.predicates(config))
-    new_vectors = None
-    while new_vectors is None:
-      f, cache = generated_features.next()
-      log.debug('Candidate feature\n%s', f)
-      new_vectors = extend_feature_vectors(feature_vectors, f, cache)
-
-    features.append(f)
-    feature_vectors = new_vectors
-
-    reporter.accept_feature()
-    log.info('Feature %s: %s', len(features), f)
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('Feature Vectors\n  ' +
-        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
-          indent=2))
-
-  # pick the non-conflict vector with the most good instances
-  best = 0
-  good_vectors = [None]
-  bad_vectors = []
-  for v,g,b in feature_vectors:
-    if len(b):
-      bad_vectors.append(v)
-    elif len(g) > best:
-      log.debug('Best vector: %s', v)
-      best = len(g)
-      good_vectors[0] = v
-
-  clauses = learn_boolean(len(features), good_vectors, bad_vectors)
+  clauses = learn_boolean(len(features), pos_vecs, neg_vecs)
 
   pre = mk_AndPred(
           mk_OrPred(
@@ -423,22 +284,26 @@ def infer_strong_precondition_by_examples(config, goods, bads,
   return pre
 
 
-def infer_precondition_by_examples(config, goods, bads,
-    features=()):
-  """Synthesize a precondition which accepts the good examples and
-  rejects the bad examples.
+def infer_preconditions_by_examples(config, positive, negative,
+    features = (),
+    incompletes = False,
+    conflict_set = find_largest_conflict_set):
+  """Synthesize preconditions which accepts the positive instances and rejects
+  the negative ones. This is a generator, but will only yield one result if
+  incompletes is False.
 
-  features is None or an initial list of features; additional features
-  will be appended to this list.
+  features - an optional list of features to start with
+  incompletes - if true, yield intermediate preconditions which accept some
+    but not all positive instances
+  conflict_set - a strategy for selecting conflict sets
   """
   log = logger.getChild('pie')
-
   features = list(features)
 
-  log.info('Inferring: %s good, %s bad, %s features', len(goods),
-    len(bads), len(features))
+  log.info('Inferring: examples %s/%s, features %s', len(positive),
+    len(negative), len(features))
 
-  feature_vectors = [((),goods,bads)]
+  feature_vectors = [((), positive, negative)]
   for f in features:
     new_vectors = extend_feature_vectors(feature_vectors, f)
 
@@ -454,26 +319,42 @@ def infer_precondition_by_examples(config, goods, bads,
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
           indent=2))
 
+  incomplete_coverage = 0
   while True:
-    # find a conflict set
-    conflict = find_conflict_set(feature_vectors)
+
+    # if we are yielding intermediate results, then see if any positive
+    # instances have moved out of a conflict set, and then return a precondition
+    # which covers at least the largest positive vector
+    if incompletes:
+      available_positives = sum(len(v[1]) for v in feature_vectors if not v[2])
+      log.debug('available positives: %s', available_positives)
+      if available_positives > incomplete_coverage:
+        incomplete_coverage = available_positives
+        yield make_precondition(features, feature_vectors, incompletes)
+
+    conflict = conflict_set(feature_vectors)
     if conflict is None:
       break
 
+    # prepare to learn a new feature
     if len(conflict[0]) + len(conflict[1]) > CONFLICT_SET_CUTOFF:
       samples = [sample_conflict_set(*conflict) for _ in xrange(SAMPLES)]
     else:
       samples = [conflict]
 
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('samples\n' + pformat(samples, prefix='  '))
+
+    # find a feature which divides a sample and is safe for all positives
     generated_features = dividing_features(
-      samples, enumerator.predicates(config)
-    )
+      samples, enumerator.predicates(config))
     new_vectors = None
     while new_vectors is None:
       f, cache = generated_features.next()
       log.debug('Candidate feature\n%s', f)
       new_vectors = extend_feature_vectors(feature_vectors, f, cache)
 
+    # add the new feature
     features.append(f)
     feature_vectors = new_vectors
 
@@ -484,24 +365,8 @@ def infer_precondition_by_examples(config, goods, bads,
         pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
           indent=2))
 
-  good_vectors = []
-  bad_vectors = []
-
-  for vector, g, b in feature_vectors:
-    assert not g or not b
-    if g:
-      good_vectors.append(vector)
-    else:
-      bad_vectors.append(vector)
-
-  clauses = learn_boolean(len(features), good_vectors, bad_vectors)
-
-  pre = mk_AndPred(
-          mk_OrPred(
-            negate_pred(features[l]) if l < 0 else features[l] for l in c)
-          for c in clauses)
-
-  return pre
+  # no conflict sets left
+  yield make_precondition(features, feature_vectors, False)
 
 def satisfiable(expr, substitutes):
   """Return whether expr can be satisfied, given the substitutions.
@@ -676,13 +541,58 @@ def exponential_sample(iterable):
     yield x
     skip *= 2
 
+def check_refinement(opt, pre, symbols, solver_bad):
+  """Return counter-examples
+  """
+  # TODO: add support for weakening
+  log = logger.getChild('check_refinement')
+
+  for type_vector in opt.type_models():
+    reporter.test_precondition()
+    smt = safety.Translator(type_vector)
+
+    tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
+
+    log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
+      tgt_safe, premises, consequent)
+
+
+    pre_smt = smt(pre)
+    pre_safe = pre_smt.safe
+    pd = pre_smt.defined + pre_smt.nonpoison
+    pd.append(pre_smt.value)
+
+    log.debug('\npre_safe %s\npd %s', pre_safe, pd)
+
+    if tgt_safe:
+      pre_safe.append(mk_implies(pd, mk_and(tgt_safe)))
+
+    premises.extend(pd)
+
+    e = mk_implies(pre_safe + premises, consequent)
+    log.debug('Validity check: %s', e)
+
+    symbol_smts = [smt.eval(t) for t in symbols]
+    counter_examples = list(TestCase(type_vector, tc)
+      for tc in itertools.islice(
+        get_models(z3.Not(e), symbol_smts), solver_bad)
+    )
+
+    if counter_examples:
+      return counter_examples
+
+  return []
+
+
 def infer_precondition(opt,
     features=(),
     random_cases=100,
     solver_good=10,
     solver_bad=10,
     strengthen=False,
-    use_features=False):
+    use_features=False,
+    incompletes=False,
+    conflict_set=find_largest_conflict_set):
   log = logger.getChild('infer')
 
   if log.isEnabledFor(logging.INFO):
@@ -726,50 +636,24 @@ def infer_precondition(opt,
 
   while not valid:
     reporter.begin_round()
-    pre = infer_strong_precondition_by_examples(config, goods, bads, features)
 
-    if log.isEnabledFor(logging.INFO):
-      log.info('Inferred precondition:\n  ' + pformat(pre, indent=2))
+    pres = infer_preconditions_by_examples(config, goods, bads,
+      features=features, incompletes=incompletes, conflict_set=conflict_set)
 
     valid = True
 
-    for type_vector in type_model.type_vectors():
-      reporter.test_precondition()
-      smt = safety.Translator(type_vector)
+    for pre in pres:
+      if log.isEnabledFor(logging.INFO):
+        log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
 
-      tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
-
-      log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
-        tgt_safe, premises, consequent)
-
-
-      pre_smt = smt(pre)
-      pre_safe = pre_smt.safe
-      pd = pre_smt.defined + pre_smt.nonpoison
-      pd.append(pre_smt.value)
-
-      log.debug('\npre_safe %s\npd %s', pre_safe, pd)
-
-      if tgt_safe:
-        pre_safe.append(mk_implies(pd, mk_and(tgt_safe)))
-
-      premises.extend(pd)
-
-      e = mk_implies(pre_safe + premises, consequent)
-      log.debug('Validity check: %s', e)
-
-      symbol_smts = [smt.eval(t) for t in symbols]
-      counter_examples = list(itertools.islice(
-        get_models(z3.Not(e), symbol_smts), solver_bad))
-
-      log.info('counter-examples: %s', len(counter_examples))
+      counter_examples = check_refinement(opt, pre, symbols, solver_bad)
 
       if counter_examples:
         valid = False
-        bads.extend(TestCase(type_vector, tc) for tc in counter_examples)
+        bads.extend(counter_examples)
         break
 
-  return pre
+      yield pre
 
 
 # ----
@@ -869,6 +753,12 @@ def set_reporter(rep):
   global reporter
   reporter = rep
 
+cs_strategies = {
+  'largest': find_largest_conflict_set,
+  'smallest': find_smallest_conflict_set,
+  'maxpos': find_most_positive_conflict_set,
+  'minneg': find_least_negative_conflict_set,
+}
 
 def main():
   import argparse, sys, logging.config
@@ -881,6 +771,12 @@ def main():
     help='Find a stronger precondition')
   parser.add_argument('--features', action='store_true',
     help='Take clauses from precondition as initial features')
+  parser.add_argument('--incompletes', action='store_true',
+    help='Report too-strong preconditions during inference')
+  parser.add_argument('--strategy', action='store',
+    default='largest',
+    choices=cs_strategies,
+    help='Method for choosing conflict set')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin])
 
@@ -891,16 +787,20 @@ def main():
     print opt.format()
     set_reporter(Reporter())
 
-    pre = infer_precondition(opt, strengthen=args.strengthen,
+    pres = infer_precondition(opt, strengthen=args.strengthen,
       use_features=args.features,
-      random_cases=500)
-    reporter.clear_message()
+      random_cases=500,
+      incompletes=args.incompletes,
+      conflict_set=cs_strategies[args.strategy])
 
-    opt.pre = pre
-    print
-    print opt.format()
-    print '; rounds {0.round:,}\n; features in final round {0.features:,}\n' \
-      '; total features generated {0.generated_features:,}'.format(reporter)
+    for pre in pres:
+      reporter.clear_message()
+
+      opt.pre = pre
+      print
+      print opt.format()
+      print '; rounds {0.round:,}\n; features in final round {0.features:,}\n' \
+        '; total features generated {0.generated_features:,}'.format(reporter)
 
 if __name__ == '__main__':
   main()
