@@ -801,6 +801,7 @@ def main():
       print opt.format()
       print '; rounds {0.round:,}\n; features in final round {0.features:,}\n' \
         '; total features generated {0.generated_features:,}'.format(reporter)
+      sys.stdout.flush()
 
 if __name__ == '__main__':
   main()
