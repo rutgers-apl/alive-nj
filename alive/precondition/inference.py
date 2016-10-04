@@ -262,6 +262,7 @@ def make_precondition(features, feature_vectors, incomplete):
 
   incomplete - require success only for the most positive vector
   """
+  log = logger.getChild('pie')
 
   if incomplete:
     pos_vecs = filter(lambda v: not v[2], feature_vectors)
@@ -272,16 +273,24 @@ def make_precondition(features, feature_vectors, incomplete):
 
   neg_vecs = [v[0] for v in feature_vectors if v[2]]
 
-  logger.getChild('pie').debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
+  log.debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
 
   clauses = learn_boolean(len(features), pos_vecs, neg_vecs)
+
+  log.debug('clauses: %s', clauses)
+
+  # only useful when doing an incomplete precondition, but it's cheap
+  coverage = sum(len(v[1]) for v in feature_vectors if not v[2] and
+    all(clause_accepts(c, v[0]) for c in clauses))
+
+  log.debug('coverage: %s', coverage)
 
   pre = mk_AndPred(
           mk_OrPred(
             negate_pred(features[l]) if l < 0 else features[l] for l in c)
           for c in clauses)
 
-  return pre
+  return pre, coverage
 
 
 def infer_preconditions_by_examples(config, positive, negative,
@@ -642,7 +651,7 @@ def infer_precondition(opt,
 
     valid = True
 
-    for pre in pres:
+    for pre, coverage in pres:
       if log.isEnabledFor(logging.INFO):
         log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
 
@@ -653,7 +662,7 @@ def infer_precondition(opt,
         bads.extend(counter_examples)
         break
 
-      yield pre
+      yield pre, coverage
 
 
 # ----
@@ -793,14 +802,17 @@ def main():
       incompletes=args.incompletes,
       conflict_set=cs_strategies[args.strategy])
 
-    for pre in pres:
+    for pre, coverage in pres:
       reporter.clear_message()
 
       opt.pre = pre
       print
       print opt.format()
-      print '; rounds {0.round:,}\n; features in final round {0.features:,}\n' \
-        '; total features generated {0.generated_features:,}'.format(reporter)
+      print '''; positive instances {1:,} of {0.num_good_cases:,}
+; negative instances {0.num_bad_cases:,}
+; rounds {0.round:,}
+; features in final round {0.features:,}
+; total features generated {0.generated_features:,}'''.format(reporter,coverage)
       sys.stdout.flush()
 
 if __name__ == '__main__':
