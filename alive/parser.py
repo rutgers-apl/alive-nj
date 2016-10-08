@@ -56,8 +56,8 @@ class OptionalTypeAst(TypeAst):
       return self.toks[0].eval(ids, phase)
 
     return None
-    
-    
+
+
 
 
 class ValAst(Ast):
@@ -172,7 +172,7 @@ comparators = {
   'u>': 'ugt',
   'u>=': 'uge',
   }
-  
+
 
 class CmpAst(PreconditionAst):
   def condition(self, ids):
@@ -228,10 +228,10 @@ class FunAst(ValAst, PreconditionAst):
 
     # determine if this is a valid function
     name = self.toks[0]
-    
+
     if name not in L.FunCnxp.codes:
       self._fatal('Unknown function: ' + name)
-    
+
     fun = L.FunCnxp.codes[name]
 
     args = tuple(a.value(None, ids, phase) for a in self.toks[1:])
@@ -306,7 +306,7 @@ class ConvOpAst(InstAst):
     sty = self.toks.sty.eval(ids, phase)
     rty = self.toks.rty.eval(ids, phase)
     x   = self.toks.x.value(sty, ids, phase)
-    
+
     return op(x, src_ty=sty, dest_ty=rty, name=name)
 
 
@@ -315,7 +315,7 @@ class ICmpAst(InstAst):
     ty = self.toks.ty.eval(ids, phase)
     x  = self.toks.x.value(ty, ids, phase)
     y  = self.toks.y.value(ty, ids, phase)
-    
+
     return L.IcmpInst(self.toks.cmp[0], x, y, ty, name)
     # FIXME: validate cmp?
 
@@ -356,15 +356,15 @@ class SelectAst(InstAst):
 #       num_ty = IntType()
 #       num = ConstantVal(1, num_ty)
 #       ids[num.getUniqueName()] = num
-# 
+#
 #     align = self.toks.align if 'align' in self.toks else 0
 #     ty = self.toks.ty.eval(ids, phase)
-# 
+#
 #     try:
 #       return Alloca(self.toks.ty.eval(ids, phase), num_ty, num, align)
 #     except AssertionError, e:
 #       self._fatal(str(e))
-# 
+#
 # class GEPExpr(InstAst):
 #   def getOp(self, name, ids, phase):
 #     ty = self.toks.ptr_t.evalPtr(ids,phase)
@@ -374,17 +374,17 @@ class SelectAst(InstAst):
 #       t = te.evalInt(ids,phase)
 #       v = ve.getValue(ty,ids,phase)
 #       flds += [t,v]
-# 
+#
 #     return GEP(ty, ptr, flds, 'inbounds' in self.toks)
-# 
+#
 # class LoadExpr(InstAst):
 #   def getOp(self, name, ids, phase):
 #     ty = self.toks.ty.evalPtr(ids, phase)
 #     x = self.toks.x.getValue(ty, ids, phase)
 #     align = self.toks.get('align', defaultValue = 0)
-# 
+#
 #     return Load(ty, x, align)
-# 
+#
 # class StoreExpr(InstAst):
 #   def eval(self, ids, phase):
 #     val_t = self.toks.val_t.eval(ids, phase)
@@ -392,10 +392,10 @@ class SelectAst(InstAst):
 #     ptr_t = self.toks.ptr_t.evalPtr(ids, phase)
 #     ptr   = self.toks.ptr.getValue(ptr_t, ids, phase)
 #     align = self.toks.get('align', defaultValue = 0)
-# 
+#
 #     s = Store(val_t, val, ptr_t, ptr, align)
 #     ids[s.getUniqueName()] = s
-# 
+#
 
 posnum = Word(nums).setParseAction(lambda s,l,t: int(t[0]))
 
@@ -507,33 +507,33 @@ select.setParseAction(SelectAst)
 #   + (comma + Suppress('align') + posnum('align') | FollowedBy(LineEnd()))
 # alloca.setName('alloca')
 # alloca.setParseAction(AllocaExpr)
-# 
+#
 # # alloca = Suppress('alloca') + opt_ty('ty') + Optional(comma + opt_ty('num_ty') + operand('num')) \
 # #     + comma + Suppress('align') + posnum('align') \
 # #   | Suppress('alloca') + opt_ty('ty') + comma + opt_ty('num_ty') + operand('num') \
 # #   | Suppress('alloca') + (ty | FollowedBy(LineEnd()))('ty').setParseAction(OptionalTypeExpr)
-# 
-# 
+#
+#
 # gep = Suppress('getelementptr') + Optional('inbounds') + opt_ty('ptr_t') + operand('ptr') + Group(
 #   comma + ZeroOrMore(opt_ty + operand + comma) + opt_ty + operand
 #   | FollowedBy(LineEnd()))('flds')
-# 
+#
 # gep.setParseAction(GEPExpr)
-# 
+#
 # load = Suppress('load') + opt_ty('ty') + operand('x') + (comma + Suppress('align') + posnum('align')|FollowedBy(LineEnd()))
 # load.setParseAction(LoadExpr)
-# 
+#
 op = binOp | convOp | icmp | fcmp | select | copyOp # | alloca | gep | load | copyOp
 op.setName('operator')
 
 
 opInst = reg('lhs') + Suppress('=') + op('op')
 opInst.setParseAction(OpInstAst)
-# 
+#
 # store = Suppress('store') - opt_ty('val_t') - operand('val') - comma - opt_ty('ptr_t') - operand('ptr') - \
 #   (comma - Suppress('align') - posnum('align') | FollowedBy(LineEnd()))
 # store.setParseAction(StoreExpr)
-# 
+#
 # instr = opInstr | store
 # instr.setName('Instruction')
 
@@ -545,45 +545,71 @@ instr.setName('Instruction')
 
 #instrs = OneOrMore(instr - LineEnd().suppress())
 
-def parseTransform(s,l,t):
-  name = t.name[0] if t.name else ''
+class TransformAST(Ast):
+  def eval(self, include_assumptions=True, extended_results=False):
+    t = self.toks
+    name = t.name[0] if t.name else ''
+    root = t.src[-1].name()
 
-  root = t.src[-1].name()
+    if t.tgt[-1].name() != root:
+      t.tgt[-1]._fatal('Target root must redefine source ({0})'.format(root))
 
-  if t.tgt[-1].name() != root:
-    t.tgt[-1]._fatal('Target root must redefine source (' + root + ')')
+    ids = {}
+    for i in t.src: i.eval(ids, Phase.Source)
 
-  ids = {}
-  for i in t.src: i.eval(ids, Phase.Source)
+    for i in t.tgt:
+      if isinstance(i, CDefAst):
+        i.eval(ids, Phase.Target)
 
-  for i in t.tgt:
-    if isinstance(i, CDefAst):
-      i.eval(ids, Phase.Target)
+    preconditions = []
+    assumptions = []
+    features = []
 
-  if t.pre[0]:
-    pre = t.pre[0].condition(ids)
-  else:
-    pre = None
+    headers = {'Pre:': preconditions,
+      'Assume:': assumptions,
+      'Feature:': features}
 
-  src = ids.pop(root)
-  for i in t.tgt:
-    if not isinstance(i, CDefAst):
-      i.eval(ids, Phase.Target)
+    for h in t.headers:
+      headers[h[0]].append(h[1].condition(ids))
 
-  return Transform(src, ids[root], pre, name)
+    if include_assumptions and not extended_results:
+      preconditions = assumptions + preconditions
+
+    if len(preconditions) > 1:
+      precondition = L.AndPred(*preconditions)
+    elif preconditions:
+      precondition = preconditions[0]
+    else:
+      precondition = None
+
+    src = ids.pop(root)
+    for i in t.tgt:
+      if not isinstance(i, CDefAst):
+        i.eval(ids, Phase.Target)
+
+    transform = Transform(src, ids[root], precondition, name)
+
+    if extended_results:
+      return transform, features, assumptions
+
+    return transform
+
 
 comment = Literal(';') + restOfLine()
 continuation = '\\' + LineEnd()
 
 EOL = Suppress(OneOrMore(LineEnd()))
 
+header = Group(oneOf('Pre: Assume:') - pre - EOL) | \
+  Group('Feature:' - pre_atom - EOL)
+
 transform = (Optional(Suppress("Name:") - SkipTo(LineEnd()) - EOL).setResultsName("name") \
-  + Optional(Suppress("Pre:") - pre - EOL, None).setResultsName("pre") \
+  + Group(ZeroOrMore(header))('headers') \
   + Group(OneOrMore(instr - EOL)).setResultsName("src") \
   - Suppress("=>") - EOL \
   - Group(OneOrMore(instr - EOL)).setResultsName("tgt"))
 transform.setName('transform')
-transform.setParseAction(parseTransform)
+transform.setParseAction(TransformAST)
 
 transforms = Optional(EOL) + ZeroOrMore(transform)
 transforms.ignore(comment)
@@ -607,6 +633,22 @@ str2 = '''Name: InstCombineShift: 366-1
 %s1 = shl %TrOp, zext(C2)
 %and = and %s1, ((1<<width(C2))-1) << zext(C2)
 %r = trunc %and
+'''
+
+str3 = '''Name: test
+Assume: C1 != 0
+Feature: C1 ^ C2 == 0
+Feature: isPowerOf2(C1)
+Pre: C2 != 0
+%x = add %a, C1
+%y = add %x, C2
+=>
+%y = add %a, (C1+C2)
+'''
+
+str4 = '''%x = add %a, %b
+=>
+%x = add %a, %b
 '''
 
 # comma.setDebug()
@@ -655,9 +697,10 @@ def test(s = '%a = add i8 %b, %c', t = None):
       print e.line
       print ' ' * (e.col-1) + '^'
 
-def parse_transform(s):
+def parse_transform(s, include_assumptions=True, extended_results=False):
   try:
-    return transform.parseString(s, True)[0]
+    return transform.parseString(s, True)[0].eval(
+      include_assumptions, extended_results)
   except ParseBaseException, e:
     print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
     if e.pstr:
@@ -665,10 +708,11 @@ def parse_transform(s):
       print ' ' * (e.col-1) + '^'
     raise
 
-def parse_opt_file(s):
+def parse_opt_file(s, include_assumptions=True, extended_results=False):
   'Wrapper for transforms.parseString which exits program on exceptions.'
   try:
-    return transforms.parseString(s, True)
+    return [t.eval(include_assumptions, extended_results)
+            for t in transforms.parseString(s, True)]
   except ParseBaseException, e:
     print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
     if e.pstr:
