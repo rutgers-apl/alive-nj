@@ -147,6 +147,44 @@ def extend_feature_vectors(vectors, feature, cache=None):
 
   return new_vectors
 
+def score_features(vectors):
+  """For each feature, calculate the number of examples it isolates.
+
+  A feature isolates an example if the example would be moved into
+  a conflict set if the feature were removed.
+  """
+
+  features = len(vectors[0][0])
+  pos_count = collections.defaultdict(
+    lambda: collections.defaultdict(collections.Counter))
+  neg_count = collections.defaultdict(
+    lambda: collections.defaultdict(collections.Counter))
+
+  for v,pos,neg in vectors:
+    for f in xrange(features):
+      pos_count[f][v[0:f]+v[f+1:]][v[f]] += len(pos)
+      neg_count[f][v[0:f]+v[f+1:]][v[f]] += len(neg)
+
+  score  = [0] * features
+  pscore = [0] * features
+
+  for f in xrange(features):
+    for k,pc in pos_count[f].iteritems():
+      nc = neg_count[f][k]
+      # check whether pc and nc include both pos and neg examples and isolated examples
+      has_pos = any(pc.itervalues())
+      has_neg = any(nc.itervalues())
+      if not (has_pos and has_neg):
+        continue
+
+      pos_isolated = sum(pc[r] for r in xrange(3) if not nc[r])
+      neg_isolated = sum(nc[r] for r in xrange(3) if not pc[r])
+      score[f] += pos_isolated + neg_isolated
+      pscore[f] += pos_isolated
+
+
+  return score, pscore
+
 def clause_accepts(clause, vector):
   return any(vector[l] == REJECT if l < 0 else vector[l] == ACCEPT
               for l in clause)
@@ -227,6 +265,272 @@ def learn_boolean(feature_count, goods, bads):
 
   return cover
 
+def learn_incomplete_boolean(feature_count, weighted_positive_vectors,
+    negative_vectors, weight_threshold, max_size=1):
+  """Find an expression which rejects all negative vectors, accepts more than
+  a threshold of positive examples.
+  """
+  log = logger.getChild('learn_bool')
+
+  clauses = []
+
+  # generate all clauses up to the maximum size
+  for k in xrange(1,max_size+1):
+    clauses.extend(all_clauses(feature_count, k))
+    log.debug('size %s, clauses %s', k, len(clauses))
+
+  clauses_accepting_weight = collections.defaultdict(set)
+  clauses_accepting_vector = collections.defaultdict(list)
+  weight_accepted_by_clause = {}
+  vectors_rejected_by_clause = []
+
+  for c,clause in enumerate(clauses):
+    exc = set()
+    clause_weight = 0
+    for v,(vector,weight) in enumerate(weighted_positive_vectors):
+      if clause_accepts(clause, vector):
+        clause_weight += weight
+        clauses_accepting_vector[v].append(c)
+      else:
+        exc.add(v)
+
+    clauses_accepting_weight[clause_weight].add(c)
+    vectors_rejected_by_clause.append(exc)
+    weight_accepted_by_clause[c] = clause_weight
+
+  builder = reject_negative_vectors(negative_vectors)
+  builder.next()
+  for w in xrange(max(clauses_accepting_weight), weight_threshold, -1):
+    if w not in clauses_accepting_weight: continue
+
+    cs = clauses_accepting_weight[w]
+    clauses_to_add = []
+
+    while cs:
+      log.debug('%s clauses accepting weight %s', len(cs), w)
+
+      # choose arbitrary clause
+      #c = cs.pop()
+      c = min(cs)
+      cs.remove(c)
+      log.debug('adding clause %s %s', c, clauses[c])
+
+      # now that we've chosen this clause, we don't need to track its weight
+      del weight_accepted_by_clause[c]
+
+      clauses_to_add.append(clauses[c])
+
+      for v in vectors_rejected_by_clause[c]:
+        vw = weighted_positive_vectors[v][1]
+
+        # adjust the weight of any clauses accepting this vector
+        # (if it has already been removed, do nothing)
+        for xc in clauses_accepting_vector.pop(v, []):
+          if xc not in weight_accepted_by_clause: continue
+
+          xw = weight_accepted_by_clause[xc]
+
+          if xw > w:
+            continue
+          clauses_accepting_weight[xw].remove(xc)
+          weight_accepted_by_clause[xc] -= vw
+          clauses_accepting_weight[weight_accepted_by_clause[xc]].add(xc)
+
+
+    log.debug('sending clauses %s', clauses_to_add)
+    pre = builder.send(clauses_to_add)
+    if pre:
+      return pre
+
+
+  # if we got this far, then nothing was enough to exclude the negative vectors
+  return None
+# FIXME: either remove, or replace learn_incomplete_boolean
+def learn_incomplete_boolean_tryhard(feature_count, weighted_positive_vectors,
+    negative_vectors, weight_threshold, max_size=1):
+  """Find an expression which rejects all negative vectors, accepts more than
+  a threshold of positive examples.
+  """
+  log = logger.getChild('learn_bool.tryhard')
+
+  clauses = []
+
+  max_weight = sum(v[1] for v in weighted_positive_vectors)
+
+  # generate all clauses up to the maximum size
+  for k in xrange(1,max_size+1):
+    clauses.extend(all_clauses(feature_count, k))
+    log.debug('size %s, clauses %s', k, len(clauses))
+
+  nonselected = set(xrange(len(clauses)))
+  best_coverage = 0
+  best_pre = None
+
+  while nonselected:
+    clauses_accepting_weight = collections.defaultdict(set)
+    clauses_accepting_vector = collections.defaultdict(list)
+    weight_accepted_by_clause = {}
+    vectors_rejected_by_clause = []
+
+    initial_weight = {}
+    for c,clause in enumerate(clauses):
+      exc = set()
+      clause_weight = 0
+      for v,(vector,weight) in enumerate(weighted_positive_vectors):
+        if clause_accepts(clause, vector):
+          clause_weight += weight
+          clauses_accepting_vector[v].append(c)
+        else:
+          exc.add(v)
+
+      clauses_accepting_weight[clause_weight].add(c)
+      vectors_rejected_by_clause.append(exc)
+      weight_accepted_by_clause[c] = clause_weight
+
+      initial_weight[c] = clause_weight
+
+    # get the heaviest nonselected clause
+    heaviest_nonselected = max(
+      itertools.ifilter(lambda c: c in nonselected, xrange(len(clauses))),
+      key=initial_weight.get
+    )
+    log.debug('heaviest: %s %s', heaviest_nonselected, clauses[heaviest_nonselected])
+
+    w = weight_accepted_by_clause[heaviest_nonselected]
+    if w < best_coverage:
+      break
+
+    weight_accepted_by_clause[heaviest_nonselected] = max_weight
+    clauses_accepting_weight[w].remove(heaviest_nonselected)
+    clauses_accepting_weight[max_weight].add(heaviest_nonselected)
+
+    builder = reject_negative_vectors(negative_vectors)
+    builder.next()
+    for w in xrange(max(clauses_accepting_weight), weight_threshold, -1):
+
+      cs = clauses_accepting_weight.get(w)
+      if not cs: continue
+
+      clauses_to_add = []
+
+      while cs:
+        log.debug('%s clauses accepting weight %s', len(cs), w)
+
+        # choose arbitrary clause
+        #c = cs.pop()
+        c = min(cs)
+        cs.remove(c)
+        log.debug('adding clause %s %s', c, clauses[c])
+
+        # now that we've chosen this clause, we don't need to track its weight
+        del weight_accepted_by_clause[c]
+
+        del initial_weight[c]
+        nonselected.discard(c)
+
+        clauses_to_add.append(clauses[c])
+
+        for v in vectors_rejected_by_clause[c]:
+          vw = weighted_positive_vectors[v][1]
+
+          # adjust the weight of any clauses accepting this vector
+          # (if it has already been removed, do nothing)
+          for xc in clauses_accepting_vector.pop(v, []):
+            if xc not in weight_accepted_by_clause: continue
+
+            xw = weight_accepted_by_clause[xc]
+
+            if xw > w:
+              continue
+            clauses_accepting_weight[xw].remove(xc)
+            weight_accepted_by_clause[xc] -= vw
+            clauses_accepting_weight[weight_accepted_by_clause[xc]].add(xc)
+
+
+      log.debug('sending clauses %s', clauses_to_add)
+      pre = builder.send(clauses_to_add)
+      if pre:
+        log.debug('Got back: %s', pre)
+        cv = sum(v[1] for v in weighted_positive_vectors
+                  if all(clause_accepts(c, v[0]) for c in pre))
+        # TODO: use min of initial_weights?
+        log.debug('Coverage: %s (best %s)', cv, best_coverage)
+        if cv > best_coverage or (cv == best_coverage and len(pre) < len(best_pre)):
+          # TODO: remove log msg once status of tryhard is deterimined
+          if best_coverage > 0:
+            log.info('Trying hard paid off %s -> %s', best_coverage, cv)
+          best_coverage = cv
+          best_pre = pre
+
+        break
+
+  # if we got this far, then nothing was enough to exclude the negative vectors
+  return best_pre
+
+
+# TODO: rewrite learn_boolean to use this
+def reject_negative_vectors(vectors):
+  """Find an expression which rejects all the provided vectors, using the
+  clauses sent to the generator.
+
+  Yield None if more clauses are needed.
+  """
+  log = logger.getChild('learn_bool')
+  clauses = []
+  excluded_by = [] # for each clause, the bad vector ids it excludes
+  excluding = collections.defaultdict(set) # n -> set of clauses excluding n vectors
+  excludes = collections.defaultdict(list) # vector id -> list of clauses
+
+  while len(excludes) < len(vectors):
+    new_clauses = yield
+    clauses.extend(new_clauses)
+
+    for c in xrange(len(excluded_by), len(clauses)):
+      exc = set()
+      for v,vector in enumerate(vectors):
+        if not clause_accepts(clauses[c], vector):
+          exc.add(v)
+          excludes[v].append(c)
+      excluded_by.append(exc)
+      excluding[len(exc)].add(c)
+
+    log.debug('%s of %s negative vectors excluded', len(excludes), len(vectors))
+
+  # everything is covered
+  cover = []
+
+  # repeatedly select the clause which excludes the most bad vectors
+  for s in xrange(max(excluding), 0, -1):
+    if s not in excluding: continue
+
+    cs = excluding[s]
+
+    while cs:
+      log.debug('%s to exclude, %s excluding %s', len(excludes), len(cs), s)
+
+      # select arbitrary clause
+      # (pick the earliest one, as it will be simplest)
+      #c = cs.pop()
+      c = min(cs)
+      cs.remove(c)
+
+      cover.append(clauses[c])
+      reporter.add_clause()
+
+      # remove all vectors excluded by clauses[c]
+      for v in excluded_by[c]:
+        for xc in excludes.pop(v):
+          if xc == c: continue
+
+          #log.debug('deleting vector %s from clause %s', v, xc)
+          exc = excluded_by[xc]
+          excluding[len(exc)].remove(xc)
+          exc.remove(v)
+          excluding[len(exc)].add(xc)
+
+  yield cover
+
+
 def mk_AndPred(clauses):
   clauses = tuple(clauses)
   if len(clauses) == 1:
@@ -277,7 +581,7 @@ def make_precondition(features, feature_vectors, incomplete):
 
   neg_vecs = [v[0] for v in feature_vectors if v[2]]
 
-  log.debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
+#   log.debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
 
   clauses = learn_boolean(len(features), pos_vecs, neg_vecs)
 
@@ -294,7 +598,7 @@ def make_precondition(features, feature_vectors, incomplete):
             negate_pred(features[l]) if l < 0 else features[l] for l in c)
           for c in clauses)
 
-  return pre, coverage
+  return pre, coverage, features
 
 
 def infer_preconditions_by_examples(config, positive, negative,
@@ -339,11 +643,57 @@ def infer_preconditions_by_examples(config, positive, negative,
     # instances have moved out of a conflict set, and then return a precondition
     # which covers at least the largest positive vector
     if incompletes:
+      # ----
+      # FIXME: move scoring somewhere appropriate
+      if log.isEnabledFor(logging.DEBUG):
+        from .. import transform
+        score, pscore = score_features(feature_vectors)
+        fmt = transform.Formatter()
+        log.debug('Feature scores:\n' + '\n'.join(
+          '  {:5,} {:5,} : {}'.format(score[f], pscore[f],
+                                transform.format(features[f], fmt))
+            for f in xrange(len(features))))
+      # ----
+
       available_positives = sum(len(v[1]) for v in feature_vectors if not v[2])
       log.debug('available positives: %s', available_positives)
       if available_positives > incomplete_coverage:
         incomplete_coverage = available_positives
         yield make_precondition(features, feature_vectors, incompletes)
+
+        # -----
+        # FIXME: use only one method for finding incomplete preconditions
+        # FIXME: none of these check for None results
+        wpos = [(v[0], len(v[1])) for v in feature_vectors if not v[2]]
+        neg = [v[0] for v in feature_vectors if v[2]]
+        cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0)
+        log.debug('clauses: %s', cl)
+        p = mk_AndPred(
+              mk_OrPred(
+                negate_pred(features[l]) if l < 0 else features[l] for l in c)
+              for c in cl)
+
+        cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
+          all(clause_accepts(c, v[0]) for c in cl))
+
+        log.debug('coverage: %s', cv)
+
+        yield p, cv, features
+#
+#         # do the same with k <= 2
+#         cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0, 2)
+#         log.debug('clauses: %s', cl)
+#         cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
+#           all(clause_accepts(c, v[0]) for c in cl))
+#         log.debug('coverage: %s', cv)
+#
+#         p = mk_AndPred(
+#               mk_OrPred(
+#                 negate_pred(features[l]) if l < 0 else features[l] for l in c)
+#               for c in cl)
+#
+#         yield p, cv, features
+        # ----
 
     conflict = conflict_set(feature_vectors)
     if conflict is None:
@@ -355,8 +705,8 @@ def infer_preconditions_by_examples(config, positive, negative,
     else:
       samples = [conflict]
 
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('samples\n' + pformat(samples, prefix='  '))
+#     if log.isEnabledFor(logging.DEBUG):
+#       log.debug('samples\n' + pformat(samples, prefix='  '))
 
     # find a feature which divides a sample and is safe for all positives
     generated_features = dividing_features(
@@ -678,7 +1028,7 @@ def infer_precondition(opt,
 
     valid = True
 
-    for pre, coverage in pres:
+    for pre, coverage, ifeatures in pres:
       if log.isEnabledFor(logging.INFO):
         log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
 
@@ -686,11 +1036,12 @@ def infer_precondition(opt,
 
       if counter_examples:
         valid = False
+        features = ifeatures
         bads.extend(counter_examples)
         reporter.test_cases(goods, bads)
         break
 
-      yield pre, coverage
+      yield pre, coverage, ifeatures
 
 
 # ----
@@ -874,10 +1225,12 @@ def main():
       incompletes=args.incompletes,
       conflict_set=cs_strategies[args.strategy])
 
-    for pre, coverage in pres:
+    for pre, coverage, ifeatures in pres:
       reporter.clear_message()
 
-      hds = [('Assume:', t) for t in assumes] + [('Pre:', pre)]
+      hds = [('Feature:', t) for t in ifeatures] + \
+        [('Assume:', t) for t in assumes] + [('Pre:', pre)]
+
       print
       print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
       print '''; positive instances {1:,} of {0.num_good_cases:,}
