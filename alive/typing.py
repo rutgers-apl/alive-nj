@@ -73,7 +73,7 @@ _constraint_class = {
 def meets_constraint(con, ty):
   if con == BOOL:
     return ty == IntType(1)
-  
+
   return isinstance(ty, _constraint_class[con])
 
 
@@ -97,6 +97,9 @@ class TypeConstraints(object):
       return
 
     assert isinstance(term, Value)
+    self._init_term(term)
+
+  def _init_term(self, term):
     self.logger.debug('adding term %s', term)
     self.sets.add_key(term)
 
@@ -115,19 +118,21 @@ class TypeConstraints(object):
   def eq_types(self, *terms):
     for t in terms:
       self.ensure(t)
-    
+
     it = iter(terms)
     t1 = self.sets.rep(it.next())
     for t2 in it:
       self.sets.unify(t1, t2, self._merge)
 
+  def _init_default(self, rep):
+    self.specific(rep, predicate_default)
+    self.constrain(rep, INT)
+    self.default_rep = rep
+
   def default(self, term):
     if self.default_rep is None:
       self.ensure(term)
-      r = self.sets.rep(term)
-      self.specific(r, predicate_default)
-      self.constrain(term, INT)
-      self.default_rep = r
+      self._init_default(self.sets.rep(term))
     else:
       self.eq_types(term, self.default_rep)
 
@@ -145,7 +150,7 @@ class TypeConstraints(object):
         term.name if hasattr(term, 'name') else str(term),
         ty,
         self.specifics[term]))
-  
+
   def constrain(self, term, con):
     self.ensure(term)
     r = self.sets.rep(term)
@@ -166,10 +171,10 @@ class TypeConstraints(object):
 
   def bool(self, term):
     self.constrain(term, BOOL)
-  
+
   def pointer(self, term):
     self.constrain(term, PTR)
-  
+
   def int_ptr_vec(self, term):
     self.constrain(term, INT_PTR)
 
@@ -195,7 +200,7 @@ class TypeConstraints(object):
 
   def validate(self):
     '''Make sure specific types meet constraints'''
-    
+
     for r in self.specifics:
       if r not in self.constraints:
         continue
@@ -208,7 +213,7 @@ class TypeConstraints(object):
 
   def simplify_orderings(self):
     if self.logger.isEnabledFor(logging.DEBUG):
-      self.logger.debug('simplifying ordering:\n  ' + 
+      self.logger.debug('simplifying ordering:\n  ' +
         pretty.pformat(self.ordering, indent=2) +
         '\n  equalities:\n' + pretty.pformat(self.width_equalities, indent=2))
 
@@ -220,7 +225,7 @@ class TypeConstraints(object):
     eqs = { (a,b) if id(a) < id(b) else (b,a) for (a,b) in eqs}
 
     if self.logger.isEnabledFor(logging.DEBUG):
-      self.logger.debug('simplified ordering:\n  ' + 
+      self.logger.debug('simplified ordering:\n  ' +
         pretty.pformat(ords, indent=2) +
         '\n  equalities:\n' + pretty.pformat(eqs, indent=2))
 
@@ -464,6 +469,161 @@ class AbstractTypeModel(object):
 
     return self._enum_vectors(0, vector)
 
+  def width_equal_tyvars(self, v1, v2):
+    """Test whether the type variables are width-equal.
+    """
+
+    if v1 > v2:
+      v1,v2 = v2,v1
+
+    while v2 in self.width_equality:
+      v2 = self.width_equality[v2]
+      if v1 == v2:
+        return True
+
+    return False
+
+  def transitive_lower_bounds(self, tyvar):
+    seen = {}
+
+    def visit(tyvar):
+      if tyvar in seen: return
+
+      for v in self.lower_bounds.get(tyvar, []):
+        yield v
+        for v2 in visit(v):
+          yield v2
+
+    return visit(tyvar)
+
+  def extend(self, term):
+    """Type-check a term in terms of this model and note variables in the
+    global context.
+
+    The term must not introduce new type variables or futher constrain types.
+    """
+
+    tc = _ModelExtender(model=self)
+    defaultable = []
+    for t in subterms(term):
+      t.type_constraints(tc)
+
+      # Note any defaultable terms for later
+      # (This duplicates logic in Transform; better to centralize this in
+      # type_constraints)
+      if isinstance(t, (Comparison, FunPred)):
+        defaultable.extend(t.args())
+
+    # check if any terms can be defaulted
+    logger.debug('defaultable: %s', defaultable)
+    for t in defaultable:
+      rep = tc.sets.rep(t)
+      if rep not in tc.rep_tyvar:
+        tc.default(rep)
+
+    for rep in tc.sets.reps():
+      # make sure every rep has been associated with a tyvar
+      # FIXME: specifics in extension could potentially be unified
+      if rep not in tc.rep_tyvar:
+        raise Error('Ambiguous type for {}'.format(_name(rep)))
+
+      tyvar = tc.rep_tyvar[rep]
+
+      c = self.constraint[tyvar]
+      cx = tc.constraints[rep]
+      if most_specific(c, cx) != c:
+        raise Error("Constraints too strong for {}".format(_name(term)))
+
+      if rep in tc.specifics:
+        if tyvar not in self.specific:
+          raise Error("Constraints too strong for {}".format(_name(term)))
+
+        if tc.specifics[rep] != self.specific[tyvar]:
+          raise Error("Incompatible constraints for {}".format(_name(term)))
+
+    tc.simplify_orderings()
+
+    # check width equalities
+    for (t1,t2) in tc.width_equalities:
+      if t1 == t2:
+        raise Error("Improperly unified {} and {}".format(_name(t1), _name(t2)))
+
+      if not self.width_equal_tyvars(tc.rep_tyvar[t1], tc.rep_tyvar[t2]):
+        raise Error("Constraints too strong for " + _name(term))
+
+    # check width inequalities
+    for (lo,hi) in tc.ordering:
+      v2 = tc.rep_tyvar[hi]
+      if isinstance(lo, int):
+        if lo > self.min_width.get(v2,0) and \
+            all(lo > self.min_width.get(v,0)
+              for v in self.transitive_lower_bounds(v2)) and \
+            (v2 not in self.specific or lo > self.bits(self.specific[v2])):
+          raise Error("Constraints too strong for " + _name(term))
+      else:
+        v1 = tc.rep_tyvar[lo]
+
+        if all(v != v1 for v in self.transitive_lower_bounds(v2)):
+          raise Error("Constraints too strong for " + _name(term))
+
+    # assign tyvars to the new terms
+    for rep, terms in tc.sets.subset_items():
+      tyvar = tc.rep_tyvar[rep]
+
+      for t in terms:
+        assert t not in context or context[t] == tyvar
+        context[t] = tyvar
+
+def _name(term):
+  return term.name if hasattr(term, 'name') else str(term)
+
+class _ModelExtender(TypeConstraints):
+  """Used by AbstractTypeModel.extend.
+  """
+  logger = logger.getChild('_ModelExtender')
+
+  def __init__(self, model, **kws):
+    self.model = model
+    self.tyvar_reps = [None] * model.tyvars
+    self.rep_tyvar = {}
+    super(_ModelExtender, self).__init__(**kws)
+
+  def _init_term(self, term):
+    super(_ModelExtender, self)._init_term(term)
+
+    if term not in context:
+      return
+
+    tyvar = context[term]
+    rep = self.tyvar_reps[tyvar]
+    if rep:
+      self.sets.unify(term, rep, self._merge)
+    else:
+      self.logger.debug('Set rep for tyvar %s to %s', tyvar, term)
+      self.tyvar_reps[tyvar] = term
+      self.rep_tyvar[term] = tyvar
+
+  def _merge(self, t1, t2):
+    super(_ModelExtender, self)._merge(t1, t2)
+
+    if t2 in self.rep_tyvar:
+      if t1 in self.rep_tyvar:
+        raise Error('Cannot unify types for {} and {}'.format(
+          _name(t1), _name(t2)))
+
+      tyvar = self.rep_tyvar.pop(t2)
+      self.rep_tyvar[t1] = tyvar
+      self.tyvar_reps[tyvar] = t1
+      self.logger.debug('Set rep for tyvar %s to %s', tyvar, t1)
+
+  def _init_default(self, rep):
+    super(_ModelExtender, self)._init_default(rep)
+    tyvar = self.model.default_id
+
+    assert rep not in self.rep_tyvar
+    assert self.tyvar_reps[tyvar] is None
+    self.rep_tyvar[rep] = tyvar
+    self.tyvar_reps[tyvar] = rep
 
 class Validator(object):
   """Compare type constraints for a term against a supplied type vector.

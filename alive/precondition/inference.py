@@ -642,6 +642,9 @@ def infer_precondition(opt,
   if use_features:
     features = [t for t in L.subterms(opt.pre)
                     if isinstance(t, (L.Comparison, L.FunPred))]
+  elif features:
+    for t in features:
+      type_model.extend(t)
 
   while not valid:
     reporter.begin_round()
