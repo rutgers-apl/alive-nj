@@ -720,6 +720,14 @@ def parse_opt_file(s, include_assumptions=True, extended_results=False):
       print ' ' * (e.col-1) + '^'
     exit(-1)
 
+def read_opt_files(files, include_assumptions=True, extended_results=False):
+  for f in files:
+    if f.isatty():
+      sys.stderr.write('[Reading from terminal...]\n')
+
+    for opt in parse_opt_file(f.read(), include_assumptions, extended_results):
+      yield opt
+
 
 def parse_opts(s):
   # transforms.setDebug()

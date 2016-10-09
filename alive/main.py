@@ -9,7 +9,7 @@ from . import config
 from . import typing
 from . import refinement
 from . import smtinterp
-from .parser import parse_opt_file
+from .parser import read_opt_files
 
 class StatusReporter(object):
   _fmt         = '{0.tested} Tested. Done {0.checks:2} for {0.opt.name!r}'
@@ -45,7 +45,7 @@ class StatusReporter(object):
       print '----------'
       print opt.format()
       print
-    
+
     self.write_status()
 
   def add_proof(self):
@@ -121,19 +121,6 @@ class StatusReporter(object):
         self.status.write('  ')
         self.status.write(n)
         self.status.write('\n')
-
-
-def read_opt_files(files):
-  for f in files:
-    if f.isatty():
-      sys.stderr.write('[Reading from terminal...]\n')
-
-    for n,opt in itertools.izip(itertools.count(1), parse_opt_file(f.read())):
-      if opt.name:
-        opt.name = '{}#{}:{}'.format(f.name, n, opt.name)
-      else:
-        opt.name = '{}#{}'.format(f.name, n, opt.name)
-      yield opt
 
 
 rounding_modes = {

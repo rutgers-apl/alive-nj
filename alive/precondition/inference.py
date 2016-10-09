@@ -791,12 +791,13 @@ def main():
 
   args = parser.parse_args()
 
-  for opt in read_opt_files(args.file):
+  for opt,features,assumes in read_opt_files(args.file, extended_results=True):
     print '-----'
     print opt.format()
     set_reporter(Reporter())
 
     pres = infer_precondition(opt, strengthen=args.strengthen,
+      features=features,
       use_features=args.features,
       random_cases=500,
       incompletes=args.incompletes,
