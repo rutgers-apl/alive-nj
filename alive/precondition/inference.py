@@ -674,6 +674,7 @@ def infer_precondition(opt,
       if counter_examples:
         valid = False
         bads.extend(counter_examples)
+        reporter.test_cases(goods, bads)
         break
 
       yield pre, coverage
