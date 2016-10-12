@@ -455,7 +455,7 @@ def get_corner_cases(types):
   return itertools.product(*map(corners, types))
 
 def make_test_cases(opt, symbols, inputs, type_vectors,
-    num_random, num_good, num_bad, strengthen=False):
+    num_random, num_good, num_bad, assumptions=(), strengthen=False):
   log = logger.getChild('make_test_cases')
 
 
@@ -473,12 +473,15 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     symbol_smts = [smt.eval(t) for t in symbols]
 
     safe, premises, consequent = interpret_opt(smt, opt, strengthen)
+    assumptions_smt = [smt.eval(t) for t in assumptions]
 
     e = mk_and(safe + [mk_implies(premises, consequent)])
-    log.debug('Query:\n%s', e)
+
+    query = mk_and(assumptions_smt + [z3.Not(e)])
+    log.debug('Negative Query:\n%s', query)
 
     solver_bads = [tc
-      for tc in itertools.islice(get_models(z3.Not(e), symbol_smts), num_bad)
+      for tc in itertools.islice(get_models(query, symbol_smts), num_bad)
       if not any(v is None for (_,v) in tc)]
       # NOTE: getting None as a value means we can't use it as a test-case,
       # but discarding them may lead to false positives
@@ -494,8 +497,8 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
 
-      query = mk_and(premises + [mk_forall(input_smts, [e])])
-      log.debug('Query\n%s', query)
+      query = mk_and(assumptions_smt + premises + [mk_forall(input_smts, [e])])
+      log.debug('Positive Query\n%s', query)
       solver_goods = [tc for
         tc in itertools.islice(get_models(query, symbol_smts), num_good)
         if not any(v is None for (_,v) in tc)]
@@ -506,7 +509,8 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
       skip.update(tuple(v.as_long() for (_,v) in tc) for tc in solver_goods)
       reporter.test_cases(goods, bads)
 
-    filter = mk_and(premises) if premises else None
+    filter = mk_and(assumptions_smt + premises) \
+      if assumptions_smt or premises else None
 
     symbol_types = [type_vector[typing.context[s]] for s in symbols]
     corner_tcs = get_corner_cases(symbol_types)
@@ -550,7 +554,7 @@ def exponential_sample(iterable):
     yield x
     skip *= 2
 
-def check_refinement(opt, pre, symbols, solver_bad):
+def check_refinement(opt, assumptions, pre, symbols, solver_bad):
   """Return counter-examples
   """
   # TODO: add support for weakening
@@ -565,21 +569,25 @@ def check_refinement(opt, pre, symbols, solver_bad):
     log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
       tgt_safe, premises, consequent)
 
+    meta_premise = []
+    for t in assumptions:
+      t_smt = smt(t)
+      meta_premise.extend(t_smt.safe)
+      meta_premise.extend(t_smt.defined)
+      meta_premise.extend(t_smt.nonpoison)
+      meta_premise.append(t_smt.value)
 
     pre_smt = smt(pre)
-    pre_safe = pre_smt.safe
-    pd = pre_smt.defined + pre_smt.nonpoison
-    pd.append(pre_smt.value)
+    meta_premise.extend(pre_smt.safe)
+    meta_premise.extend(pre_smt.defined)
+    meta_premise.extend(pre_smt.nonpoison)
+    meta_premise.append(pre_smt.value)
 
-    log.debug('\npre_safe %s\npd %s', pre_safe, pd)
+    log.debug('meta_premise\n%s', meta_premise)
 
-    if tgt_safe:
-      pre_safe.append(mk_implies(pd, mk_and(tgt_safe)))
-
-    premises.extend(pd)
-
-    e = mk_implies(pre_safe + premises, consequent)
-    log.debug('Validity check: %s', e)
+    e = mk_implies(meta_premise,
+                   mk_and(tgt_safe + [mk_implies(premises, consequent)]))
+    log.debug('Validity check\n%s', e)
 
     symbol_smts = [smt.eval(t) for t in symbols]
     counter_examples = list(TestCase(type_vector, tc)
@@ -595,6 +603,7 @@ def check_refinement(opt, pre, symbols, solver_bad):
 
 def infer_precondition(opt,
     features=(),
+    assumptions=(),
     random_cases=100,
     solver_good=10,
     solver_bad=10,
@@ -612,6 +621,8 @@ def infer_precondition(opt,
 
   type_model = opt.abstract_type_model()
   type_vectors = list(exponential_sample(type_model.type_vectors()))
+  for t in assumptions:
+    type_model.extend(t)
 
   symbols = []
   ty_symbols = collections.defaultdict(list)
@@ -630,7 +641,7 @@ def infer_precondition(opt,
   assert all(isinstance(t, (L.Input, L.Instruction)) for t in reps)
 
   goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
-    random_cases, solver_good, solver_bad, strengthen)
+    random_cases, solver_good, solver_bad, assumptions, strengthen)
 
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
 
@@ -658,7 +669,7 @@ def infer_precondition(opt,
       if log.isEnabledFor(logging.INFO):
         log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
 
-      counter_examples = check_refinement(opt, pre, symbols, solver_bad)
+      counter_examples = check_refinement(opt, assumptions, pre, symbols, solver_bad)
 
       if counter_examples:
         valid = False
@@ -801,6 +812,7 @@ def main():
 
     pres = infer_precondition(opt, strengthen=args.strengthen,
       features=features,
+      assumptions=assumes,
       use_features=args.features,
       random_cases=500,
       incompletes=args.incompletes,
