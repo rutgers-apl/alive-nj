@@ -154,6 +154,11 @@ def clause_accepts(clause, vector):
 def consistent_clause(clause, vectors):
   return all(clause_accepts(clause, v) for v in vectors)
 
+def all_clauses(lits, size):
+  for c in itertools.combinations(xrange(lits), size):
+    for p in itertools.product([True,False], repeat=size):
+      yield tuple(i if s else i-lits for (i,s) in itertools.izip(c,p))
+
 def learn_boolean(feature_count, goods, bads):
   log = logger.getChild('learn_bool')
   log.debug('called with %s features; vectors: %s good, %s bad', feature_count,
@@ -164,7 +169,6 @@ def learn_boolean(feature_count, goods, bads):
   excluding = collections.defaultdict(set) # n -> set of clauses excluding n vectors
   excludes = collections.defaultdict(list) # vector id -> list of clauses
 
-  lits = range(-feature_count, feature_count)
   k = 0
 
   # generate clauses until all bad vectors are excluded
@@ -172,7 +176,7 @@ def learn_boolean(feature_count, goods, bads):
     k += 1
     assert k <= feature_count # FIXME
     reporter.increase_clause_size()
-    clauses.extend(c for c in itertools.combinations(lits, k)
+    clauses.extend(c for c in all_clauses(feature_count, k)
       if consistent_clause(c, goods))
 
     log.debug('size %s; %s consistent clauses', k, len(clauses))
