@@ -385,7 +385,7 @@ class AbstractTypeModel(object):
 
   def floor(self, vid, vector):
     if vid in self.lower_bounds:
-      floor = max(vector[v].width for v in self.lower_bounds[vid])
+      floor = max(vector[v] for v in self.lower_bounds[vid])
     else:
       floor = 0
     floor = max(floor, self.min_width.get(vid, 0))
