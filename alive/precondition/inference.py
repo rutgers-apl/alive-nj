@@ -649,6 +649,19 @@ def infer_precondition(opt,
 
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
 
+  # ----
+  # FIXME: remove or formalize test of given precondition
+  if opt.pre:
+    cache = {}
+    prepos = sum(1 for e in goods if test_feature(opt.pre, e, cache) == ACCEPT)
+    preneg = sum(1 for e in bads if test_feature(opt.pre, e, cache) != ACCEPT)
+    msg = 'Accepts {}/{} positive; rejects {}/{} negative'.format(
+      prepos, len(goods), preneg, len(bads))
+    reporter.clear_message()
+    log.info('Given precondition: %s', msg)
+    print ';', msg
+  # ----
+
   valid = not bads
   pre = None
 
