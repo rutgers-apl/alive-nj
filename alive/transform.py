@@ -229,7 +229,7 @@ class Formatter(object):
   def operand(self, term, ty = None):
     ty = str(ty) + ' ' if ty else ''
 
-    if isinstance(term, Instruction):
+    if term in self.ids or isinstance(term, Instruction):
       return ty + self.name(term)
 
     return ty + format(term, self)
