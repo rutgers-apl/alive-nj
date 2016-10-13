@@ -122,65 +122,25 @@ class Transform(pretty.PrettyRepr):
     Terms are generated before any terms that reference them.
     """
 
-    uses = count_uses(self.tgt)
-    if self.pre:
-      count_uses(self.pre, uses)
-
-    for t in subterms(self.tgt):
-      if uses[t] > 1 and isinstance(t, Constant) and not isinstance(t, Symbol):
-        yield t
+    return constant_defs(self.tgt, [self.pre] if self.pre else [])
 
   def format(self):
-    s = ''
-    if self.name:
-      s += 'Name: ' + self.name + '\n'
-      
-    f = Formatter()
-    srci = get_insts(self.src)
-    
-    src_lines = [format(i, f) for i in srci]
-    
-    if logger.isEnabledFor(logging.DEBUG):
-      logger.debug('Generated source\n%s\n  %s',
-        '\n'.join(src_lines), pretty.pformat(f.ids, indent=2))
-
-    tgt_lines = ['{} = {}'.format(f.name(v), format(v, f))
-                  for v in self.constant_defs()]
-
-    if tgt_lines and logger.isEnabledFor(logging.DEBUG):
-      logger.debug('Generated constant definitions\n%s\n  %s',
-        '\n'.join(tgt_lines), pretty.pformat(f.ids, indent=2))
-
-    if self.pre:
-      s += 'Pre: ' + format(self.pre, f) + '\n'
-
-    s += '\n'.join(src_lines) + '\n=>\n'
-
-    if isinstance(self.tgt, Instruction):
-      f.ids[self.tgt] = self.src.name
-
-    tgti = get_insts(self.tgt)
-    tgt_lines.extend(format(i, f) for i in tgti if i not in f.ids)
-
-    if not isinstance(self.tgt, Instruction):
-      tgt_lines.append(self.src.name + ' = ' + format(self.tgt, f))
-    else:
-      tgt_lines.append(format(self.tgt, f))
-
-    s += '\n'.join(tgt_lines)
-
-    return s
+    return format_parts(
+      self.name,
+      [('Pre:', self.pre)] if self.pre else [],
+      self.src,
+      self.tgt)
 
 def get_insts(v):
   def walk(v, insts, seen):
     if v in seen or not isinstance(v, Instruction):
       return
-    
+
     seen.add(v)
 
     for a in v.args():
       walk(a, insts, seen)
-    
+
     insts.append(v)
 
   seen = set()
@@ -200,6 +160,57 @@ def count_uses(dag, uses=None):
 
   walk(dag)
   return uses
+
+def constant_defs(tgt, terms=[]):
+  """Generate shared constant terms from the target and precondition.
+
+  Terms are generated before any terms that reference them.
+  """
+  uses = count_uses(tgt)
+  for t in terms:
+    count_uses(t, uses)
+
+  for t in subterms(tgt):
+    if uses[t] > 1 and isinstance(t, Constant) and not isinstance(t, Symbol):
+      yield t
+
+def format_parts(name, headers, src, tgt):
+  """Return a printable string for an optimization.
+
+  Usage:
+    print format_parts('spam', ('Pre:', eggs), bacon, spam)
+  """
+  lines = []
+  if name:
+    lines.append('Name: ' + name)
+
+  fmt = Formatter()
+  srci = get_insts(src)
+  src_lines = [format(i, fmt) for i in srci]
+
+  tgt_lines = ['{} = {}'.format(fmt.name(v), format(v, fmt))
+                for v in constant_defs(tgt, map(lambda h: h[1], headers))]
+
+
+  for h,t in headers:
+    lines.append(h + ' ' + format(t, fmt))
+
+  lines.extend(src_lines)
+  lines.append('=>')
+  lines.extend(tgt_lines)
+
+  if isinstance(tgt, Instruction):
+    fmt.ids[tgt] = src.name
+
+  tgti = get_insts(tgt)
+  lines.extend(format(i, fmt) for i in tgti if i not in fmt.ids)
+
+  if not isinstance(tgt, Instruction):
+    lines.append(src.name + ' = ' + format(tgt, fmt))
+  else:
+    lines.append(format(tgt, fmt))
+
+  return '\n'.join(lines)
 
 class Formatter(object):
   def __init__(self):

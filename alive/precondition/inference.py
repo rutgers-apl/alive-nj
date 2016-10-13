@@ -612,7 +612,6 @@ def infer_precondition(opt,
     solver_good=10,
     solver_bad=10,
     strengthen=False,
-    use_features=False,
     incompletes=False,
     conflict_set=find_largest_conflict_set):
   log = logger.getChild('infer')
@@ -625,7 +624,11 @@ def infer_precondition(opt,
 
   type_model = opt.abstract_type_model()
   type_vectors = list(exponential_sample(type_model.type_vectors()))
+
   for t in assumptions:
+    type_model.extend(t)
+
+  for t in features:
     type_model.extend(t)
 
   symbols = []
@@ -666,13 +669,6 @@ def infer_precondition(opt,
   pre = None
 
   config = enumerator.Config(ty_symbols, reps, type_model)
-
-  if use_features:
-    features = [t for t in L.subterms(opt.pre)
-                    if isinstance(t, (L.Comparison, L.FunPred))]
-  elif features:
-    for t in features:
-      type_model.extend(t)
 
   while not valid:
     reporter.begin_round()
@@ -850,20 +846,30 @@ def main():
 
   for opt,features,assumes in read_opt_files(args.file, extended_results=True):
     print '-----'
-    if args.echo:
-      print opt.format()
-
-    set_reporter(Reporter())
 
     if not args.assumptions:
       assumes = []
     if args.assume_pre:
       assumes.append(opt.pre)
 
+    if not args.features:
+      features = []
+    if args.pre_features and opt.pre:
+      features.extend(t for t in L.subterms(opt.pre)
+                        if isinstance(t, (L.Comparison, L.FunPred)))
+
+    if args.echo:
+      hds = [('Assume:', t) for t in assumes]
+      if opt.pre:
+        hds.append(('Pre:', opt.pre))
+      hds.extend(('Feature:', t) for t in features)
+      print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
+
+    set_reporter(Reporter())
+
     pres = infer_precondition(opt, strengthen=args.strengthen,
-      features=features if args.features else [],
+      features=features,
       assumptions=assumes,
-      use_features=args.pre_features,
       random_cases=500,
       incompletes=args.incompletes,
       conflict_set=cs_strategies[args.strategy])
@@ -871,9 +877,9 @@ def main():
     for pre, coverage in pres:
       reporter.clear_message()
 
-      opt.pre = pre
+      hds = [('Assume:', t) for t in assumes] + [('Pre:', pre)]
       print
-      print opt.format()
+      print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
       print '''; positive instances {1:,} of {0.num_good_cases:,}
 ; negative instances {0.num_bad_cases:,}
 ; rounds {0.round:,}
