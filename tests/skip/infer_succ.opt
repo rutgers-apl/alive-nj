@@ -1079,8 +1079,8 @@ Pre: -1 == (C1 | C2)
 ; features in final round 1
 ; total features generated 10,308
 
-Name: <stdin>#4:Select:433
-Pre: ((C1 u<= (C2 / C2) || C1 == C2) && (C1 u<= (C2 / C2) || isPowerOf2(C1)) && (0 == (C1 * C2) || C1 == C2))
+Name: Select:433
+Pre: ((C1 == C2 || C2 == 0 || C1 == 0) && (C1 != C2 || C2 == 0 || isPowerOf2(C1)))
 %and = and %X, C1
 %c = icmp eq %and, 0
 %T = or %X, C2
@@ -1089,4 +1089,95 @@ Pre: ((C1 u<= (C2 / C2) || C1 == C2) && (C1 u<= (C2 / C2) || isPowerOf2(C1)) && 
 %r = or %X, C2
 ; rounds 1
 ; features in final round 6
-; total features generated 10,316
+; total features generated 12,691
+
+Name: Select:510
+Pre: ((C == C2 || C == (C2 + -1)) && (C == C2 || C < C2))
+%c = icmp sgt %X, C
+%r = select %c, %X, C2
+=>
+%c2 = icmp slt %X, C2
+%r = select %c2, C2, %X
+; positive instances 106 of 106
+; negative instances 2,316
+; rounds 1
+; features in final round 4
+; total features generated 552
+
+Name: Select:511
+Pre: (C >= C2 && (C == C2 || C == (C2 + 1)))
+%c = icmp slt %X, C
+%r = select %c, %X, C2
+=>
+%c2 = icmp sgt %X, C2
+%r = select %c2, C2, %X
+; positive instances 110 of 110
+; negative instances 2,305
+; rounds 1
+; features in final round 3
+; total features generated 518
+
+; TODO Select:523  sext
+; TODO Select:524  sext
+; TODO Select:525  sext
+; TODO Select:526  sext
+; TODO Select:537  zext
+; TODO Select:538  zext
+
+Name: Select:719
+Pre: (C1 < C2 || C1 == C2)
+%c = icmp slt %A, C1
+%smin = select %c, %A, C1
+%c2 = icmp slt %smin, C2
+%smin2 = select %c2, %smin, C2
+=>
+%smin2 = select %c, %A, C1
+; positive instances 1,265 of 1,265
+; negative instances 1,153
+; rounds 1
+; features in final round 2
+; total features generated 15
+
+Name: Select:720
+Pre: C1 u>= C2
+%c = icmp uge %A, C1
+%umax = select %c, %A, C1
+%c2 = icmp uge %umax, C2
+%umax2 = select %c2, %umax, C2
+=>
+%umax2 = select %c, %A, C1
+; positive instances 1,249 of 1,249
+; negative instances 1,172
+; rounds 1
+; features in final round 1
+; total features generated 7
+
+Name: Select:727
+Pre: C1 >= C2
+%c = icmp slt %A, C1
+%smin = select %c, %A, C1
+%c2 = icmp slt %smin, C2
+%smin2 = select %c2, %smin, C2
+=>
+%c3 = icmp slt %A, C2
+%smin2 = select %c3, %A, C2
+; positive instances 1,207 of 1,207
+; negative instances 1,216
+; rounds 1
+; features in final round 1
+; total features generated 9
+
+Name: Select:728
+Pre: (C1 u< C2 || C1 == C2)
+%c = icmp uge %A, C1
+%umax = select %c, %A, C1
+%c2 = icmp uge %umax, C2
+%umax2 = select %c2, %umax, C2
+=>
+%c3 = icmp uge %A, C2
+%umax2 = select %c3, %A, C2
+; positive instances 1,235 of 1,235
+; negative instances 1,191
+; rounds 1
+; features in final round 2
+; total features generated 13
