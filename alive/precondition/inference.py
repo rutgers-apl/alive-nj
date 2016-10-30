@@ -4,7 +4,7 @@ from .. import typing
 from .. import smtinterp
 from ..analysis import safety
 from ..util.pretty import pformat
-from ..z3util import mk_and, mk_or, mk_forall
+from ..z3util import mk_and, mk_or, mk_not, mk_forall
 import collections
 import itertools
 import logging
@@ -954,6 +954,51 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
 
   return []
 
+def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
+  """Return positive examples which the precondition excludes.
+  """
+
+  log = logger.getChild('check_completeness')
+  log.debug('Checking completeness')
+
+  for type_vector in opt.type_models():
+    log.debug('checking types %s', type_vector)
+    reporter.test_precondition() # make more specific?
+    smt = safety.Translator(type_vector)
+
+    tgt_safe, premises, consequent = interpret_opt(smt, opt)
+
+    meta_premise = []
+    for t in assumptions:
+      t_smt = smt(t)
+      meta_premise.extend(t_smt.safe)
+      meta_premise.append(t_smt.value)
+      assert not t_smt.defined or t_smt.value
+      # TODO: add these to premises?
+
+    pre_smt = smt(pre)
+    meta_premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
+    assert not pre_smt.defined or pre_smt.value
+    # TODO: add these to premises?
+
+    log.debug('meta_premise\n%s', meta_premise)
+
+    input_smts = [smt.eval(t) for t in inputs]
+
+    e = mk_and(meta_premise +
+         [mk_forall(input_smts, tgt_safe + [mk_implies(premises, consequent)])])
+
+    log.debug('Validity check\n%s', e)
+    symbol_smts = [smt.eval(t) for t in symbols]
+
+    false_negatives = list(TestCase(type_vector, tc)
+      for tc in itertools.islice(get_models(e, symbol_smts), solver_good)
+    )
+
+    if false_negatives:
+      return false_negatives
+
+  return []
 
 def infer_precondition(opt,
     features=(),
@@ -963,6 +1008,7 @@ def infer_precondition(opt,
     solver_bad=10,
     strengthen=False,
     incompletes=False,
+    weakest=False,
     conflict_set=find_largest_conflict_set):
   log = logger.getChild('infer')
 
@@ -1039,7 +1085,21 @@ def infer_precondition(opt,
         features = ifeatures
         bads.extend(counter_examples)
         reporter.test_cases(goods, bads)
+        log.info('%s false positives', len(counter_examples))
         break
+
+      if weakest and coverage == len(goods):
+        false_negatives = check_completeness(
+          opt, assumptions, pre, symbols, inputs, solver_good
+        )
+
+        if false_negatives:
+          valid = False
+          features = ifeatures
+          goods.extend(false_negatives)
+          reporter.test_cases(goods, bads)
+          log.info('%s false negatives', len(false_negatives))
+          break
 
       yield pre, coverage, ifeatures
 
@@ -1149,6 +1209,7 @@ cs_strategies = {
 }
 
 default_strengthen = False
+default_weakest = False
 default_assume_pre = False
 default_pre_features = False
 default_incompletes = True
@@ -1168,6 +1229,9 @@ def main():
   parser.add_argument('--strengthen', action=NegatableFlag,
     default=default_strengthen,
     help='Find a stronger precondition')
+  parser.add_argument('--weakest', action=NegatableFlag,
+    default=default_weakest,
+    help='Ensure precondition accepts all valid instances')
   parser.add_argument('--assume-pre', action=NegatableFlag,
     default=default_assume_pre,
     help='Treat precondition as an assumption')
@@ -1219,6 +1283,7 @@ def main():
     set_reporter(Reporter())
 
     pres = infer_precondition(opt, strengthen=args.strengthen,
+      weakest=args.weakest,
       features=features,
       assumptions=assumes,
       random_cases=500,
