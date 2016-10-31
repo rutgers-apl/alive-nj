@@ -545,25 +545,7 @@ def mk_OrPred(clauses):
 
   return L.OrPred(*clauses)
 
-_neg_icmp_ops = {
-  'eq':  'ne',
-  'ne':  'eq',
-  'slt': 'sge',
-  'sle': 'sgt',
-  'sgt': 'sle',
-  'sge': 'slt',
-  'ult': 'uge',
-  'ule': 'ugt',
-  'ugt': 'ule',
-  'uge': 'ult',
-}
-
-def negate_pred(pred):
-  if isinstance(pred, L.Comparison):
-    return pred.copy(op=_neg_icmp_ops[pred.op])
-
-  return L.NotPred(pred)
-
+negate_pred = enumerator.negate_pred
 
 def make_precondition(features, feature_vectors, incomplete):
   """Return an expression which is true for the positive feature vectors.
