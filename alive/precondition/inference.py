@@ -1048,6 +1048,15 @@ def infer_precondition(opt,
 
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
 
+  if not goods:
+    goods, bads = make_test_cases(opt, symbols, inputs,
+      type_model.type_vectors(), random_cases, solver_good or 10, solver_bad,
+      assumptions, strengthen)
+
+    log.info('Full Examples: %s positive, %s negative', len(goods), len(bads))
+    if not goods:
+      raise NoPositives
+
   # ----
   # FIXME: remove or formalize test of given precondition
   if opt.pre:
@@ -1105,6 +1114,9 @@ def infer_precondition(opt,
 
 
 # ----
+
+class NoPositives(Exception):
+  pass
 
 import sys, os
 
@@ -1290,20 +1302,24 @@ def main():
       incompletes=args.incompletes,
       conflict_set=cs_strategies[args.strategy])
 
-    for pre, coverage, ifeatures in pres:
-      reporter.clear_message()
+    try:
+      for pre, coverage, ifeatures in pres:
+        reporter.clear_message()
 
-      hds = [('Feature:', t) for t in ifeatures] + \
-        [('Assume:', t) for t in assumes] + [('Pre:', pre)]
+        hds = [('Feature:', t) for t in ifeatures] + \
+          [('Assume:', t) for t in assumes] + [('Pre:', pre)]
 
-      print
-      print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
-      print '''; positive instances {1:,} of {0.num_good_cases:,}
+        print
+        print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
+        print '''; positive instances {1:,} of {0.num_good_cases:,}
 ; negative instances {0.num_bad_cases:,}
 ; rounds {0.round:,}
 ; features in final round {0.features:,}
 ; total features generated {0.generated_features:,}'''.format(reporter,coverage)
-      sys.stdout.flush()
+        sys.stdout.flush()
+    except NoPositives:
+      reporter.clear_message()
+      print 'No positive instances'
 
 if __name__ == '__main__':
   main()
