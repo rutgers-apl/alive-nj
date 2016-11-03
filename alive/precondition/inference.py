@@ -1097,6 +1097,9 @@ def infer_precondition(opt,
         log.info('%s false positives', len(counter_examples))
         break
 
+      # sound but possibly incomplete
+      yield pre, coverage, ifeatures
+
       if weakest and coverage == len(goods):
         false_negatives = check_completeness(
           opt, assumptions, pre, symbols, inputs, solver_good
@@ -1109,8 +1112,9 @@ def infer_precondition(opt,
           reporter.test_cases(goods, bads)
           log.info('%s false negatives', len(false_negatives))
           break
+        else:
+          return
 
-      yield pre, coverage, ifeatures
 
 
 # ----
