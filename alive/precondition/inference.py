@@ -584,7 +584,7 @@ def make_precondition(features, feature_vectors, incomplete):
 
 
 def infer_preconditions_by_examples(config, positive, negative,
-    features = (),
+    initial_features = (),
     incompletes = False,
     conflict_set = find_largest_conflict_set):
   """Synthesize preconditions which accepts the positive instances and rejects
@@ -597,13 +597,15 @@ def infer_preconditions_by_examples(config, positive, negative,
   conflict_set - a strategy for selecting conflict sets
   """
   log = logger.getChild('pie')
-  features = list(features)
 
   log.info('Inferring: examples %s/%s, features %s', len(positive),
     len(negative), len(features))
 
+  # initialize feature_vectors and features
+  # discard any suggested features which are unsafe for positive examples
   feature_vectors = [((), positive, negative)]
-  for f in features:
+  features = []
+  for f in initial_features:
     new_vectors = extend_feature_vectors(feature_vectors, f)
 
     if new_vectors is None:
@@ -611,6 +613,7 @@ def infer_preconditions_by_examples(config, positive, negative,
       continue
 
     feature_vectors = new_vectors
+    features.append(f)
 
     reporter.accept_feature()
     if log.isEnabledFor(logging.DEBUG):
