@@ -1310,5 +1310,9 @@ def main():
       reporter.clear_message()
       print 'No positive instances'
 
+    if args.weakest:
+      reporter.clear_message()
+      print '; precondition is complete'
+
 if __name__ == '__main__':
   main()
