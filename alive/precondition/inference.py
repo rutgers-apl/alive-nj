@@ -147,6 +147,31 @@ def extend_feature_vectors(vectors, feature, cache=None):
 
   return new_vectors
 
+def create_feature_vectors(features, positive, negative):
+  """Create a feature matrix given features and sets of +/- examples.
+
+  Returns the features which are safe for all positive examples and the
+  feature vectors for those features.
+  """
+  log = logger.getChild('pie')
+  vectors = [((),positive,negative)]
+  accepted_features = []
+  for f in features:
+    new_vectors = extend_feature_vectors(vectors, f)
+
+    if new_vectors is None:
+      log.info('Dropping feature %s', f)
+      continue
+
+    vectors = new_vectors
+    accepted_features.append(f)
+
+    if log.isEnabledFor(logging.DEBUG):
+      log.debug('Feature Vectors\n  ' +
+        pformat([(v,len(p),len(n)) for (v,p,n) in vectors], indent=2))
+
+  return accepted_features, vectors
+
 def score_features(vectors):
   """For each feature, calculate the number of examples it isolates.
 
@@ -201,6 +226,7 @@ def learn_boolean(feature_count, goods, bads):
   log = logger.getChild('learn_bool')
   log.debug('called with %s features; vectors: %s good, %s bad', feature_count,
     len(goods), len(bads))
+  reporter.enter_boolean_learner()
 
   clauses = []
   excluded_by = [] # for each clause, the bad vector ids it excludes
@@ -352,6 +378,7 @@ def learn_incomplete_boolean_tryhard(feature_count, weighted_positive_vectors,
   a threshold of positive examples.
   """
   log = logger.getChild('learn_bool.tryhard')
+  reporter.enter_boolean_learner()
 
   clauses = []
 
@@ -361,6 +388,7 @@ def learn_incomplete_boolean_tryhard(feature_count, weighted_positive_vectors,
   for k in xrange(1,max_size+1):
     clauses.extend(all_clauses(feature_count, k))
     log.debug('size %s, clauses %s', k, len(clauses))
+    reporter.increase_clause_size()
 
   nonselected = set(xrange(len(clauses)))
   best_coverage = 0
@@ -583,8 +611,55 @@ def make_precondition(features, feature_vectors, incomplete):
   return pre, coverage, features
 
 
+
+class MoreExamples(Exception):
+  """Used to signal that the lists of examples have been updated.
+  """
+  pass
+
+def preconditions_satisfying_examples(config, positive, negative,
+    incompletes = False, **kws):
+  """Generate preconditions accepting the positive and rejecting the negative
+  examples through enumeration.
+
+  incompletes - if True, also generate preconditions which accept any positve
+  examples and reject all negative examples.
+
+  After a call to next() has returned, clients can throw MoreExamples to
+  indicate that the number of examples has changed.
+  """
+
+  log = logger.getChild('pse')
+
+  pres = enumerator.preconditions(config)
+  for pre in pres:
+    reporter.consider_feature()
+    log.debug('Considering %s', pre)
+    cache = {}
+
+    if any(test_feature(pre, e, cache) == ACCEPT for e in negative):
+      continue
+
+    try:
+      if incompletes:
+        coverage = sum(1 for e in positive
+                         if test_feature(pre, e, cache) == ACCEPT)
+        if coverage > 0:
+          yield pre, coverage, []
+
+        if coverage == len(positive):
+          return
+
+      elif all(test_feature(pre, e, cache) == ACCEPT for e in positive):
+        yield pre, len(positive)
+        return
+
+    except MoreExamples:
+      # not actually necessary to do anything
+      yield None
+
 def infer_preconditions_by_examples(config, positive, negative,
-    initial_features = (),
+    features = (),
     incompletes = False,
     conflict_set = find_largest_conflict_set):
   """Synthesize preconditions which accepts the positive instances and rejects
@@ -601,120 +676,111 @@ def infer_preconditions_by_examples(config, positive, negative,
   log.info('Inferring: examples %s/%s, features %s', len(positive),
     len(negative), len(features))
 
-  # initialize feature_vectors and features
-  # discard any suggested features which are unsafe for positive examples
-  feature_vectors = [((), positive, negative)]
-  features = []
-  for f in initial_features:
-    new_vectors = extend_feature_vectors(feature_vectors, f)
-
-    if new_vectors is None:
-      log.info('Skipping feature %s', f)
-      continue
-
-    feature_vectors = new_vectors
-    features.append(f)
-
-    reporter.accept_feature()
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('Feature Vectors\n  ' +
-        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
-          indent=2))
+  features, feature_vectors = create_feature_vectors(features,positive,negative)
 
   incomplete_coverage = 0
   while True:
+    try:
 
-    # if we are yielding intermediate results, then see if any positive
-    # instances have moved out of a conflict set, and then return a precondition
-    # which covers at least the largest positive vector
-    if incompletes:
-      # ----
-      # FIXME: move scoring somewhere appropriate
-      if log.isEnabledFor(logging.DEBUG):
-        from .. import transform
-        score, pscore = score_features(feature_vectors)
-        fmt = transform.Formatter()
-        log.debug('Feature scores:\n' + '\n'.join(
-          '  {:5,} {:5,} : {}'.format(score[f], pscore[f],
-                                transform.format(features[f], fmt))
-            for f in xrange(len(features))))
-      # ----
-
-      available_positives = sum(len(v[1]) for v in feature_vectors if not v[2])
-      log.debug('available positives: %s', available_positives)
-      if available_positives > incomplete_coverage:
-        incomplete_coverage = available_positives
-        yield make_precondition(features, feature_vectors, incompletes)
-
-        # -----
-        # FIXME: use only one method for finding incomplete preconditions
-        # FIXME: none of these check for None results
-        wpos = [(v[0], len(v[1])) for v in feature_vectors if not v[2]]
-        neg = [v[0] for v in feature_vectors if v[2]]
-        cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0)
-        log.debug('clauses: %s', cl)
-        p = mk_AndPred(
-              mk_OrPred(
-                negate_pred(features[l]) if l < 0 else features[l] for l in c)
-              for c in cl)
-
-        cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
-          all(clause_accepts(c, v[0]) for c in cl))
-
-        log.debug('coverage: %s', cv)
-
-        yield p, cv, features
-#
-#         # do the same with k <= 2
-#         cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0, 2)
-#         log.debug('clauses: %s', cl)
-#         cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
-#           all(clause_accepts(c, v[0]) for c in cl))
-#         log.debug('coverage: %s', cv)
-#
-#         p = mk_AndPred(
-#               mk_OrPred(
-#                 negate_pred(features[l]) if l < 0 else features[l] for l in c)
-#               for c in cl)
-#
-#         yield p, cv, features
+      # if we are yielding intermediate results, then see if any positive
+      # instances have moved out of a conflict set, and then return a precondition
+      # which covers at least the largest positive vector
+      if incompletes:
+        # ----
+        # FIXME: move scoring somewhere appropriate
+        if log.isEnabledFor(logging.DEBUG):
+          from .. import transform
+          score, pscore = score_features(feature_vectors)
+          fmt = transform.Formatter()
+          log.debug('Feature scores:\n' + '\n'.join(
+            '  {:5,} {:5,} : {}'.format(score[f], pscore[f],
+                                  transform.format(features[f], fmt))
+              for f in xrange(len(features))))
         # ----
 
-    conflict = conflict_set(feature_vectors)
-    if conflict is None:
-      break
+        available_positives = sum(len(v[1]) for v in feature_vectors if not v[2])
+        log.debug('available positives: %s', available_positives)
+        if available_positives > incomplete_coverage:
+          incomplete_coverage = available_positives
+          yield make_precondition(features, feature_vectors, incompletes)
 
-    # prepare to learn a new feature
-    if len(conflict[0]) + len(conflict[1]) > CONFLICT_SET_CUTOFF:
-      samples = [sample_conflict_set(*conflict) for _ in xrange(SAMPLES)]
-    else:
-      samples = [conflict]
+          # -----
+          # FIXME: use only one method for finding incomplete preconditions
+          # FIXME: none of these check for None results
+          wpos = [(v[0], len(v[1])) for v in feature_vectors if not v[2]]
+          neg = [v[0] for v in feature_vectors if v[2]]
+          cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0)
+          log.debug('clauses: %s', cl)
+          p = mk_AndPred(
+                mk_OrPred(
+                  negate_pred(features[l]) if l < 0 else features[l] for l in c)
+                for c in cl)
 
-#     if log.isEnabledFor(logging.DEBUG):
-#       log.debug('samples\n' + pformat(samples, prefix='  '))
+          cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
+            all(clause_accepts(c, v[0]) for c in cl))
 
-    # find a feature which divides a sample and is safe for all positives
-    generated_features = dividing_features(
-      samples, enumerator.predicates(config))
-    new_vectors = None
-    while new_vectors is None:
-      f, cache = generated_features.next()
-      log.debug('Candidate feature\n%s', f)
-      new_vectors = extend_feature_vectors(feature_vectors, f, cache)
+          log.debug('coverage: %s', cv)
 
-    # add the new feature
-    features.append(f)
-    feature_vectors = new_vectors
+          yield p, cv, features
+#
+#           # do the same with k <= 2
+#           cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0, 2)
+#           log.debug('clauses: %s', cl)
+#           cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
+#             all(clause_accepts(c, v[0]) for c in cl))
+#           log.debug('coverage: %s', cv)
+#
+#           p = mk_AndPred(
+#                 mk_OrPred(
+#                   negate_pred(features[l]) if l < 0 else features[l] for l in c)
+#                 for c in cl)
+#
+#           yield p, cv, features
+          # ----
 
-    reporter.accept_feature()
-    log.info('Feature %s: %s', len(features), f)
-    if log.isEnabledFor(logging.DEBUG):
-      log.debug('Feature Vectors\n  ' +
-        pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
-          indent=2))
+      conflict = conflict_set(feature_vectors)
+      if conflict is None:
+        yield make_precondition(features, feature_vectors, False)
+        return
 
-  # no conflict sets left
-  yield make_precondition(features, feature_vectors, False)
+      # prepare to learn a new feature
+      if len(conflict[0]) + len(conflict[1]) > CONFLICT_SET_CUTOFF:
+        samples = [sample_conflict_set(*conflict) for _ in xrange(SAMPLES)]
+      else:
+        samples = [conflict]
+
+#       if log.isEnabledFor(logging.DEBUG):
+#         log.debug('samples\n' + pformat(samples, prefix='  '))
+
+      # find a feature which divides a sample and is safe for all positives
+      generated_features = dividing_features(
+        samples, enumerator.predicates(config))
+      new_vectors = None
+      while new_vectors is None:
+        f, cache = generated_features.next()
+        log.debug('Candidate feature\n%s', f)
+        new_vectors = extend_feature_vectors(feature_vectors, f, cache)
+
+      # add the new feature
+      features.append(f)
+      feature_vectors = new_vectors
+
+      reporter.accept_feature()
+      log.info('Feature %s: %s', len(features), f)
+      if log.isEnabledFor(logging.DEBUG):
+        log.debug('Feature Vectors\n  ' +
+          pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
+            indent=2))
+
+    except MoreExamples:
+      log.debug('Caught MoreExamples')
+
+      # TODO: make sure the new examples made a difference
+      features, feature_vectors = \
+        create_feature_vectors(features, positive, negative)
+
+      yield None
+      # sending None here allows throw() to be used in a for loop
 
 def satisfiable(expr, substitutes):
   """Return whether expr can be satisfied, given the substitutions.
@@ -898,6 +964,7 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
   """
   # TODO: add support for weakening
   log = logger.getChild('check_refinement')
+  reporter.begin_solving()
 
   for type_vector in opt.type_models():
     reporter.test_precondition()
@@ -945,6 +1012,7 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
 
   log = logger.getChild('check_completeness')
   log.debug('Checking completeness')
+  reporter.begin_solving()
 
   for type_vector in opt.type_models():
     log.debug('checking types %s', type_vector)
@@ -985,6 +1053,7 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
 
   return []
 
+
 def infer_precondition(opt,
     features=(),
     assumptions=(),
@@ -998,10 +1067,9 @@ def infer_precondition(opt,
   log = logger.getChild('infer')
 
   if log.isEnabledFor(logging.INFO):
-    log.info('infer_precondtion invoked on %r (%s features,'
-      '%s randoms, %s +solver, %s -solver',
-      opt.name, 'No' if features is None else len(features),
-      random_cases, solver_good, solver_bad)
+    log.info('infer_precondition invoked on %r (%s features,'
+      '%s randoms, %s +solver, %s -solver)',
+      opt.name, len(features), random_cases, solver_good, solver_bad)
 
   type_model = opt.abstract_type_model()
   type_vectors = list(exponential_sample(type_model.type_vectors()))
@@ -1060,46 +1128,40 @@ def infer_precondition(opt,
 
   config = enumerator.Config(ty_symbols, reps, type_model)
 
-  while not valid:
-    reporter.begin_round()
+  pres = infer_preconditions_by_examples(config, goods, bads,
+    features=features, incompletes=incompletes, conflict_set=conflict_set)
 
-    pres = infer_preconditions_by_examples(config, goods, bads,
-      features=features, incompletes=incompletes, conflict_set=conflict_set)
+  for pre, coverage, ifeatures in pres:
+    if log.isEnabledFor(logging.INFO):
+      log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
 
-    valid = True
+    counter_examples = check_refinement(opt, assumptions, pre, symbols, solver_bad)
 
-    for pre, coverage, ifeatures in pres:
-      if log.isEnabledFor(logging.INFO):
-        log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
+    if counter_examples:
+      log.info('%s false positives', len(counter_examples))
+      bads.extend(counter_examples)
+      reporter.test_cases(goods, bads)
+      pres.throw(MoreExamples)
+      continue
 
-      counter_examples = check_refinement(opt, assumptions, pre, symbols, solver_bad)
+    # sound but possibly incomplete
+    yield pre, coverage, ifeatures
 
-      if counter_examples:
-        valid = False
-        features = ifeatures
-        bads.extend(counter_examples)
-        reporter.test_cases(goods, bads)
-        log.info('%s false positives', len(counter_examples))
-        break
+    # avoid checking for false negatives unnecessarily
+    if not weakest or coverage < len(goods):
+      continue
 
-      # sound but possibly incomplete
-      yield pre, coverage, ifeatures
+    false_negatives = check_completeness(
+      opt, assumptions, pre, symbols, inputs, solver_good
+    )
 
-      if weakest and coverage == len(goods):
-        false_negatives = check_completeness(
-          opt, assumptions, pre, symbols, inputs, solver_good
-        )
-
-        if false_negatives:
-          valid = False
-          features = ifeatures
-          goods.extend(false_negatives)
-          reporter.test_cases(goods, bads)
-          log.info('%s false negatives', len(false_negatives))
-          break
-        else:
-          return
-
+    if false_negatives:
+      log.info('%s false negatives', len(false_negatives))
+      goods.extend(false_negatives)
+      reporter.test_cases(goods, bads)
+      pres.throw(MoreExamples)
+    else:
+      return
 
 
 # ----
@@ -1114,16 +1176,17 @@ class SilentReporter(object):
   def consider_feature(self): pass
   def accept_feature(self): pass
   def test_precondition(self): pass
-  def begin_round(self): pass
+  def begin_solving(self): pass
+  def enter_boolean_learner(self): pass
   def increase_clause_size(self): pass
   def add_clause(self): pass
 
 class Reporter(object):
-  _fmt_cases = 'Round {0.round} Adding test cases: {0.num_good_cases:,}/{0.num_bad_cases:,}'
-  _fmt_features = 'Round {0.round} Considered {0.generated_features:5,} Accepted {0.features:2}'
-  _fmt_cnf = 'Round {0.round} Adding {0.k}-CNF clauses of {0.features} features'
-  _fmt_clauses = 'Round {0.round} Selected {0.clauses} clauses of {0.features} features'
-  _fmt_proofs = 'Round {0.round} Testing: {0.proofs:2} proofs'
+  _fmt_cases = 'Adding test cases: {0.num_good_cases:,}/{0.num_bad_cases:,}'
+  _fmt_features = 'Considered {0.generated_features:5,} Accepted {0.features:2}'
+  _fmt_cnf = 'Adding {0.k}-CNF clauses of {0.features} features'
+  _fmt_clauses = 'Selected {0.clauses} clauses of {0.features} features'
+  _fmt_proofs = 'Testing: {0.proofs:2} proofs'
 
   def __init__(self):
     self.num_good_cases = 0
@@ -1133,7 +1196,6 @@ class Reporter(object):
     self.k = 0
     self.clauses = 0
     self.proofs = 0
-    self.round = 0
     self.width = int(os.environ.get('COLUMNS', 80))
 
     if sys.stdout.isatty():
@@ -1172,6 +1234,10 @@ class Reporter(object):
     if self.status:
       self.write_message(self._fmt_features.format(self))
 
+  def enter_boolean_learner(self):
+    self.k = 0
+    self.clauses = 0
+
   def increase_clause_size(self):
     self.k += 1
     if self.status:
@@ -1182,12 +1248,7 @@ class Reporter(object):
     if self.status:
       self.write_message(self._fmt_clauses.format(self))
 
-  def begin_round(self):
-    self.round += 1
-    #self.generated_features = 0
-    self.features = 0
-    self.k = 0
-    self.clauses = 0
+  def begin_solving(self):
     self.proofs = 0
 
   def test_precondition(self):
@@ -1300,11 +1361,10 @@ def main():
 
         print
         print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
-        print '''; positive instances {1:,} of {0.num_good_cases:,}
-; negative instances {0.num_bad_cases:,}
-; rounds {0.round:,}
-; features in final round {0.features:,}
-; total features generated {0.generated_features:,}'''.format(reporter,coverage)
+        print '''; positive examples {1:,} of {0.num_good_cases:,}
+; negative examples {0.num_bad_cases:,}
+; accepted features {0.features:,}
+; total features tested {0.generated_features:,}'''.format(reporter,coverage)
         sys.stdout.flush()
     except NoPositives:
       reporter.clear_message()

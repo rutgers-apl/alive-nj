@@ -290,6 +290,11 @@ def negate_pred(pred):
 
   return L.NotPred(pred)
 
+def preconditions(config):
+  for size in itertools.count(2):
+    logger.info('Generating size %s', size)
+    for p in sized_preconditions(config, size):
+      yield p
 
 def sized_preconditions(config, size):
   def combine(l, r, neg):
@@ -298,13 +303,12 @@ def sized_preconditions(config, size):
 
   def predicates(size):
     return sized_predicates(config, size)
-    #return 'ABC' if size == 1 else []
 
   def disjunctions(size):
-    for t in assocs(size, combine, neg_subexprs=predicates):
+    for t in assocs(size, combine, 2, neg_subexprs=predicates):
       yield L.OrPred(*_flatten(t))
 
-  for t in assocs(size,combine, subexprs=disjunctions, neg_subexprs=predicates):
+  for t in assocs(size,combine, 2, subexprs=disjunctions, neg_subexprs=predicates):
     yield L.AndPred(*_flatten(t))
 
   for t in disjunctions(size):
@@ -513,7 +517,7 @@ cfg = Config({0: [L.Symbol('C1'), L.Symbol('C2')]},
 def noexprs(size):
   return []
 
-def assocs(size, combine, subexprs=noexprs, neg_subexprs=noexprs):
+def assocs(size, combine, start=1, subexprs=noexprs, neg_subexprs=noexprs):
   """Generate unique expressions of a commutative, associative, idempotent
   operator.
 
@@ -603,4 +607,4 @@ def assocs(size, combine, subexprs=noexprs, neg_subexprs=noexprs):
       for c in subexprs(size):
         yield combine(None, c, False)
 
-  return increase(size, 0, singles=False)
+  return increase(size, start-1, singles=False)
