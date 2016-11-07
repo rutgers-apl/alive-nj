@@ -1034,6 +1034,9 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     assert not pre_smt.defined or pre_smt.value
     # TODO: add these to premises?
 
+    # don't bother with trivial instances
+    meta_premise.extend(premises)
+
     log.debug('meta_premise\n%s', meta_premise)
 
     input_smts = [smt.eval(t) for t in inputs]
