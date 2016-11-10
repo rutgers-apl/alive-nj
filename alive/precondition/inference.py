@@ -1096,6 +1096,11 @@ def infer_precondition(opt,
     elif isinstance(t, L.Input):
       inputs.append(t)
 
+  # don't generate width() for fixed or non-integer types
+  for r in xrange(type_model.tyvars):
+    if type_model.constraint[r] != typing.INT:
+      reps[r] = None
+
   reps = [r for r in reps if r is not None]
   assert all(isinstance(t, (L.Input, L.Instruction)) for t in reps)
 
