@@ -342,7 +342,7 @@ def sized_predicates(config, size):
     # E1 < E2, E1 u< E2
     for rsize in xrange(1, (size+1)/2):
       for l,bl in expressions(config, ty, size-rsize):
-        for r,br in expressions(config, ty, rsize):
+        for r,br in expressions(config, ty, rsize, one=True):
           if bl and br: continue
           yield L.Comparison('slt', l, r)
           yield L.Comparison('sgt', l, r)
@@ -350,8 +350,8 @@ def sized_predicates(config, size):
           yield L.Comparison('ugt', l, r)
 
     if size % 2 == 0:
-      for n,(l,bl) in enumerate(expressions(config, ty, size/2)):
-        for r,br in itertools.islice(expressions(config, ty, size/2), n):
+      for n,(l,bl) in enumerate(expressions(config, ty, size/2, one=True)):
+        for r,br in itertools.islice(expressions(config,ty,size/2,one=True), n):
           if bl and br: continue
           yield L.Comparison('slt', l, r)
           yield L.Comparison('sgt', l, r)
@@ -419,7 +419,7 @@ def products(config, ty, size):
     return set_type(L.MulCnxp(x,y), ty), bx and by
 
   return assocs(size, combine,
-    subexprs=lambda s: expressions(config, ty, s, products=False))
+    subexprs=lambda s: expressions(config, ty, s, sums=False, products=False))
 
 def logic(config, ty, size):
   def Or(x, (y,by), neg):
