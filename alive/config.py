@@ -24,21 +24,24 @@ timeout = 5*60*1000
 # which class to use for translation to SMT (by lowercased name)
 translator = 'smtundef'
 
+# one more than the largest size for integer type variables
+int_limit = 65
+
 # logging configuration. see logging.config docs for schema
 logs = {
   'version': 1,
   'disable_existing_loggers': False,
-  
+
   'formatters': {
     'default': {
       'format': '%(asctime)s %(levelname)-8s %(name)s - %(message)s',
     },
-    
+
     'brief': {
       'format': '%(message)s'
     }
   },
-  
+
   'handlers': {
     'default': {
       'class': 'logging.handlers.RotatingFileHandler',
@@ -48,7 +51,7 @@ logs = {
       'backupCount': 5,
       'delay': True,
     },
-    
+
     'warnings': {
       'class': 'logging.StreamHandler',
       'formatter': 'brief',
@@ -56,12 +59,12 @@ logs = {
       'stream': sys.stderr,
     }
   },
-  
+
   'root': {
     'level': 'WARNING',
     'handlers': ['default', 'warnings']
   },
-  
+
   'loggers': {
 #     'alive.typing': { 'level': 'DEBUG' },
 #     'alive.transform': { 'level': 'DEBUG' },

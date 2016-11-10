@@ -2,6 +2,7 @@
 Apply typing constraints to the IR.
 '''
 
+from . import config
 from .language import *
 from .util import disjoint, pretty
 import logging, itertools
@@ -352,7 +353,6 @@ class AbstractTypeModel(object):
     # in principle, this could be a parameter to the model, or even vary during
     # enumeration, but right now pointer width doesn't affect anything
 
-  max_int = 65 # one more than the largest int type permitted
   float_tys = (HalfType(), SingleType(), DoubleType())
 
   def __init__(self, constraint, specific, min_width, lower_bounds,
@@ -410,7 +410,7 @@ class AbstractTypeModel(object):
 
 
   # this could be done as a stack, instead of as nested generators
-  def _enum_vectors(self, vid, vector):
+  def _enum_vectors(self, vid, vector, int_limit):
     if vid >= self.tyvars:
       yield tuple(vector)
       return
@@ -425,24 +425,24 @@ class AbstractTypeModel(object):
           self.bits(vector[vid]) != self.bits(vector[self.width_equality[vid]]):
         return
 
-      for v in self._enum_vectors(vid+1, vector):
+      for v in self._enum_vectors(vid+1, vector, int_limit):
         yield v
 
       return
 
     con = self.constraint[vid]
     if con == FIRST_CLASS:
-      tys = itertools.chain(self.int_types(1, self.max_int), (PtrType(),), self.float_tys)
+      tys = itertools.chain(self.int_types(1, int_limit), (PtrType(),), self.float_tys)
     elif con == NUMBER:
-      tys = itertools.chain(self.int_types(1, self.max_int), self.float_tys)
+      tys = itertools.chain(self.int_types(1, int_limit), self.float_tys)
     elif con == FLOAT:
       tys = (t for t in self.float_tys if t > self.floor(vid, vector))
     elif con == INT_PTR:
-      tys = itertools.chain(self.int_types(1, self.max_int), (PtrType(),))
+      tys = itertools.chain(self.int_types(1, int_limit), (PtrType(),))
     elif con == INT:
       floor = self.floor(vid, vector)
       if isinstance(floor, IntType): floor = floor.width
-      tys = self.int_types(floor + 1, self.max_int)
+      tys = self.int_types(floor + 1, int_limit)
     elif con == BOOL:
       tys = (IntType(1),)
     else:
@@ -456,10 +456,10 @@ class AbstractTypeModel(object):
 
     for t in tys:
       vector[vid] = t
-      for v in self._enum_vectors(vid+1, vector):
+      for v in self._enum_vectors(vid+1, vector, int_limit):
         yield v
 
-  def type_vectors(self):
+  def type_vectors(self, int_limit=config.int_limit):
     """Generate type vectors consistent with this model."""
 
     vector = [None] * self.tyvars
@@ -467,7 +467,7 @@ class AbstractTypeModel(object):
     for vid,ty in self.specific.iteritems():
       vector[vid] = ty
 
-    return self._enum_vectors(0, vector)
+    return self._enum_vectors(0, vector, int_limit)
 
   def width_equal_tyvars(self, v1, v2):
     """Test whether the type variables are width-equal.
