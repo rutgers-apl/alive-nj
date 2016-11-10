@@ -1113,6 +1113,10 @@ def infer_precondition(opt,
     if not goods:
       raise NoPositives
 
+  if not bads:
+    yield None, len(goods), []
+    return
+
   # ----
   # FIXME: remove or formalize test of given precondition
   if opt.pre:
@@ -1125,9 +1129,6 @@ def infer_precondition(opt,
     log.info('Given precondition: %s', msg)
     print ';', msg
   # ----
-
-  valid = not bads
-  pre = None
 
   config = enumerator.Config(ty_symbols, reps, type_model)
 
@@ -1360,7 +1361,8 @@ def main():
         reporter.clear_message()
 
         hds = [('Feature:', t) for t in ifeatures] + \
-          [('Assume:', t) for t in assumes] + [('Pre:', pre)]
+          [('Assume:', t) for t in assumes] + \
+          [('Pre:', pre)] if pre else []
 
         print
         print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
