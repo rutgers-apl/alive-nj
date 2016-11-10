@@ -1,0 +1,5 @@
+; Alive infer result Pre: (width(%r) & C1) == 0
+%y = mul i32 C1, %x
+%r = icmp eq 1, %y
+=>
+%r = 0

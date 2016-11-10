@@ -1,0 +1,7 @@
+; Program 427
+; Alive Infer result: Pre: ((C2 <= C1 || (C1 + 1) == 0) && (C2 < 0 || C2 == 0))
+%1 = sub nsw i32 C1, %0
+%2 = and %0, %1
+%3 = icmp slt %2, C2
+=>
+%3 = 0

@@ -1,0 +1,12 @@
+
+; Program 795
+; 
+
+%1 = sext i32 %0 to i64
+%2 = lshr %0, 31
+%3 = xor C1, %2
+%4 = zext %3 to i64
+%5 = xor 4842753371, %4
+%6 = icmp sle %1, %5
+=>
+%6 = 1

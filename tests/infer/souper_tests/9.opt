@@ -1,0 +1,12 @@
+
+; Program 795
+; Alive-Infer result; (C2 >= 0 && ((C2 u>> width(%3)) != 0 || C1 < 0) && ((C2 u>> width(%3)) != 0 || width(%3) >= C2))
+
+%1 = sext i32 %0 to i64
+%2 = lshr %0, 31
+%3 = xor C1, %2
+%4 = zext %3 to i64
+%5 = xor C2, %4
+%6 = icmp sle %1, %5
+=>
+%6 = 1
