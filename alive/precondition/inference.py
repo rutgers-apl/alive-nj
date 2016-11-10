@@ -58,6 +58,7 @@ def dividing_features(samples, features):
 
   for pred in features:
     reporter.consider_feature()
+    log.debug('Feature %s', pred)
     for good, bad in samples:
       cache = {}
       good_results = [0]*3
@@ -677,6 +678,7 @@ def infer_preconditions_by_examples(config, positive, negative,
     len(negative), len(features))
 
   features, feature_vectors = create_feature_vectors(features,positive,negative)
+  # FIXME: no longer reports these as accepted features
 
   incomplete_coverage = 0
   while True:

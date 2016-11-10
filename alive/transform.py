@@ -178,7 +178,7 @@ def format_parts(name, headers, src, tgt):
   """Return a printable string for an optimization.
 
   Usage:
-    print format_parts('spam', ('Pre:', eggs), bacon, spam)
+    print format_parts('spam', [('Pre:', eggs)], bacon, spam)
   """
   lines = []
   if name:
