@@ -1304,17 +1304,20 @@ cs_strategies = {
   'minneg': find_least_negative_conflict_set,
 }
 
-default_strengthen = False
-default_weakest = False
-default_assume_pre = False
-default_pre_features = False
-default_incompletes = True
-default_assumptions = True
-default_features = True
-default_echo = True
-default_strategy = 'largest'
-
-def main():
+def main(
+    strengthen = False,
+    weakest = False,
+    assume_pre = False,
+    pre_features = False,
+    incompletes = True,
+    use_assumptions = True,
+    use_features = True,
+    echo = True,
+    strategy = 'largest',
+    random_examples = 500,
+    solver_positives = 10,
+    solver_negatives = 10,
+  ):
   import argparse, sys, logging.config
   from alive import config, transform
   from alive.parser import read_opt_files
@@ -1323,31 +1326,31 @@ def main():
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--strengthen', action=NegatableFlag,
-    default=default_strengthen,
+    default=strengthen,
     help='Find a stronger precondition')
   parser.add_argument('--weakest', action=NegatableFlag,
-    default=default_weakest,
+    default=weakest,
     help='Ensure precondition accepts all valid instances')
   parser.add_argument('--assume-pre', action=NegatableFlag,
-    default=default_assume_pre,
+    default=assume_pre,
     help='Treat precondition as an assumption')
   parser.add_argument('--pre-features', action=NegatableFlag,
-    default=default_pre_features,
+    default=pre_features,
     help='Take clauses from precondition as initial features')
   parser.add_argument('--incompletes', action=NegatableFlag,
-    default=default_incompletes,
+    default=incompletes,
     help='Report too-strong preconditions during inference')
   parser.add_argument('--assumptions', action=NegatableFlag,
-    default=default_assumptions,
+    default=use_assumptions,
     help='Use assumptions in Assume: headers')
   parser.add_argument('--features', action=NegatableFlag,
-    default=default_features,
+    default=use_features,
     help='Use features provided in Feature: headers')
   parser.add_argument('--echo', action=NegatableFlag,
-    default=default_echo,
+    default=echo,
     help='Print the input optimizations before inferring')
   parser.add_argument('--strategy', action='store',
-    default=default_strategy,
+    default=strategy,
     choices=cs_strategies,
     help='Method for choosing conflict set')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
@@ -1378,13 +1381,16 @@ def main():
 
     set_reporter(Reporter())
 
-    pres = infer_precondition(opt, strengthen=args.strengthen,
-      weakest=args.weakest,
-      features=features,
-      assumptions=assumes,
-      random_cases=500,
-      incompletes=args.incompletes,
-      conflict_set=cs_strategies[args.strategy])
+    pres = infer_precondition(opt,
+      strengthen = args.strengthen,
+      weakest = args.weakest,
+      features = features,
+      assumptions = assumes,
+      random_cases = random_examples,
+      solver_good = solver_positives,
+      solver_bad = solver_negatives,
+      incompletes = args.incompletes,
+      conflict_set = cs_strategies[args.strategy])
 
     try:
       for pre, coverage, ifeatures in pres:
