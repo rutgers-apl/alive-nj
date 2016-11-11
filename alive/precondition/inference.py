@@ -652,7 +652,7 @@ def preconditions_satisfying_examples(config, positive, negative,
           return
 
       elif all(test_feature(pre, e, cache) == ACCEPT for e in positive):
-        yield pre, len(positive)
+        yield pre, len(positive), []
         return
 
     except MoreExamples:
