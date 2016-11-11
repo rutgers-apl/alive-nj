@@ -861,6 +861,16 @@ def get_corner_cases(types):
 
   return itertools.product(*map(corners, types))
 
+def full_model(symbol_values):
+  """Return True if no associated value is None.
+
+  Argument is list of (symbol, value) pairs or a TestCase
+  """
+  if isinstance(symbol_values, TestCase):
+    symbol_values = symbol_values.values
+
+  return all(v is not None for s,v in symbol_values)
+
 def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad, assumptions=(), strengthen=False):
   log = logger.getChild('make_test_cases')
@@ -889,7 +899,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     solver_bads = [tc
       for tc in itertools.islice(get_models(query, symbol_smts), num_bad)
-      if not any(v is None for (_,v) in tc)]
+      if full_model(tc)]
       # NOTE: getting None as a value means we can't use it as a test-case,
       # but discarding them may lead to false positives
 
@@ -998,12 +1008,16 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
     log.debug('Validity check\n%s', e)
 
     symbol_smts = [smt.eval(t) for t in symbols]
-    counter_examples = list(TestCase(type_vector, tc)
-      for tc in itertools.islice(
-        get_models(z3.Not(e), symbol_smts), solver_bad)
-    )
+    counter_examples = list(
+      itertools.islice(get_models(z3.Not(e), symbol_smts), solver_bad))
 
     if counter_examples:
+      counter_examples = [TestCase(type_vector, tc) for tc in counter_examples
+        if full_model(tc)]
+
+      if not counter_examples:
+        raise MissingFalsePositives
+
       return counter_examples
 
   return []
@@ -1049,11 +1063,17 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     log.debug('Validity check\n%s', e)
     symbol_smts = [smt.eval(t) for t in symbols]
 
-    false_negatives = list(TestCase(type_vector, tc)
-      for tc in itertools.islice(get_models(e, symbol_smts), solver_good)
-    )
+    false_negatives = list(
+      itertools.islice(get_models(e, symbol_smts), solver_good))
 
     if false_negatives:
+      # filter out any None values Z3 may have returned
+      false_negatives = [TestCase(type_vector, tc) for tc in false_negatives
+        if full_model(tc)]
+
+      if not false_negatives:
+        raise MissingFalseNegatives
+
       return false_negatives
 
   return []
@@ -1179,6 +1199,9 @@ def infer_precondition(opt,
 
 class NoPositives(Exception):
   pass
+
+class MissingFalseNegatives(Exception): pass
+class MissingFalsePositives(Exception): pass
 
 import sys, os
 
@@ -1381,6 +1404,12 @@ def main():
     except NoPositives:
       reporter.clear_message()
       print 'No positive instances'
+    except MissingFalsePositives:
+      reporter.clear_message()
+      print '; Validity not proven'
+    except MissingFalseNegatives:
+      reporter.clear_message()
+      print '; Completeness not proven'
 
     if args.weakest:
       reporter.clear_message()
