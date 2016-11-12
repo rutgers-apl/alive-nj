@@ -1,0 +1,10 @@
+; Program 436
+; Alive Infer result: Pre: ((C1 - 1) <= 1 && C2 >= 0 && (width(%2) u>= C1 || (C1 + 1) == 0) && (C2 != 0 || C1 <= 1)
+
+%1 = srem i32 %0, C1
+%2 = trunc %1 to i16
+%3 = icmp slt C2, %2
+=>
+%3 = 0
+
+

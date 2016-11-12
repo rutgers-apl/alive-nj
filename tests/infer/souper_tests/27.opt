@@ -1,0 +1,10 @@
+; Program 111
+; Alive Infer Preconditon: Pre: ((C2 - C3) >= 0 && (C2 > C3 || C2 < C3))
+
+%1 = icmp slt i32 C1, %0
+%2 = zext %1 to i32
+%3 = or C2, %2
+%4 = sub C3, %3
+%5 = icmp slt %4, 0
+=>
+%5 = 1

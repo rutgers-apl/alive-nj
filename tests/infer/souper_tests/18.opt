@@ -1,0 +1,8 @@
+; Program 97
+; Alive Infer result : Pre: ((C1 - C3) == 0 && (C2 - C3) != 0)
+
+%1 = icmp ne i32 C1, %0
+%2 = select %1, %0, C2
+%3 = icmp eq C3, %2
+=>
+%3 = 0

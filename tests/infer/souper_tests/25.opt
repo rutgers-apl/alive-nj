@@ -1,0 +1,7 @@
+; Program 685
+; Alive Infer Precondition: Pre: (C1 > C2 && C2 < 0)
+
+%1 = lshr i32 C1, %0
+%2 = icmp slt C2, %1
+=>
+%2 = 1
