@@ -1,6 +1,6 @@
 
 ; Program 795
-; 
+; Fixed. Alive Infer result: Pre: 
 
 %1 = sext i32 %0 to i64
 %2 = lshr %0, 31

@@ -1,0 +1,8 @@
+
+; Program 549
+; 
+%1 = sext i8 %0 to i32
+%2 = add nsw C1, %1
+%3 = icmp slt %2, C2
+=>
+%3 = 1

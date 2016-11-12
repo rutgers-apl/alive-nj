@@ -1,0 +1,12 @@
+
+; Program 307
+; Interesting example as C1 and C2 are not relevant!
+; Alive Infer result: Pre: C3 > 1
+%1 = icmp eq i32 C1, %0
+%2 = zext %1 to i32
+%4 = icmp ne i32 C2, %3
+%5 = zext %4 to i32
+%6 = sub nsw %2, %5
+%7 = icmp slt %6, C3
+=>
+%7 = 1
