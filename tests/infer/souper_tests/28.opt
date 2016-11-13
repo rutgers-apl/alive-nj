@@ -1,0 +1,9 @@
+; Program 789
+; Alive Infer result: Pre: (C2 - C3) != 0
+
+%1 = icmp ne i32 C1, %0
+%2 = zext %1 to i32
+%3 = udiv C2, %2
+%4 = icmp ne C3, %3
+=>
+%4 = 1

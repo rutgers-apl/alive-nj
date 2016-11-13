@@ -1,0 +1,10 @@
+; Program 780
+; Alive Infer result: Pre: C1 >= 0
+
+%1 = icmp slt i32 C1, %0
+%3 = icmp slt i32 C2, %2
+%4 = zext %3 to i32
+%5 = icmp slt %0, %4
+%6 = and %1, %5
+=>
+%6 = 0

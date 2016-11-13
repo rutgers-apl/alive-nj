@@ -1,0 +1,8 @@
+; Program 146
+; Alive Infer result: Pre: (C2 < 0 && (C1 >= 0 || isSignBit(C2)) && ((C2 - C1) >= 0 || isSignBit(C2)))
+
+
+%1 = sub nsw i32 C1, %0
+%2 = icmp slt %1, C2
+=>
+%2 = 0

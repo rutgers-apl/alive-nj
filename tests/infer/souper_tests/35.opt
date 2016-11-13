@@ -1,0 +1,8 @@
+; Program 696
+; Alive Infer precondition: Pre: ((C1 u< C4 || (C2 & C4) != 0) && ((C2 & C4) != 0 || C2 == 0 || (C4 - 1) > 1) && C1 <= 1 && ((~C3 & C4) != 0 || C3 u> C4 || (C1 + 1) == 0) && (C2 <= 1 || !isPowerOf2(C4)))
+%1 = icmp ult i32 C1, %0
+%2 = shl %0, C2
+%3 = select %1, C3, %2
+%4 = icmp ne C4, %3
+=>
+%4 = 1

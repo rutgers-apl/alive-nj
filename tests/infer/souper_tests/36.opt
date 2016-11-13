@@ -1,0 +1,7 @@
+; Program 141
+; Alive Infer Precondition: Pre: C1 >= 0
+
+%1 = or i32 C1, %0
+%2 = icmp sle %0, %1
+=>
+%2 = 1

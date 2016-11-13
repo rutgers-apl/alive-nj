@@ -1,0 +1,12 @@
+
+; Program 1
+; Alive Infer Precondition: Pre: ((C3 - C1) != 0 && (width(%5) u< C1 || C3 < 0) && (width(%5) u>= C1 || isSignBit(C1) || (~C3 & C1) != 0) && (C3 >= 0 || (C3 & ~C1) != 0 || isSignBit(C3)) && ((C3 & ~C1) != 0 || C1 < 0) && (width(%5) u>= C1 || (C1 + 1) == 0 || !isSignBit(C3)) && (width(%5) u>= C1 || (~C3 & C1) != 0 || (C3 + 1) == 0))
+
+%1 = icmp eq i32 C1, %0
+%3 = icmp eq i32 C2, %2
+%4 = zext %3 to i32
+%5 = xor %0, %4
+%6 = icmp eq C3, %5
+%7 = and %1, %6
+=>
+%7 = 0

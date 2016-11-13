@@ -1,0 +1,8 @@
+; Program 138
+Pre: (C1 u<= 1 && C1 != 0)
+
+%1 = icmp slt i32 %0, C1
+%2 = zext %1 to i32
+%3 = icmp eq %0, %2
+=>
+%3 = 0
