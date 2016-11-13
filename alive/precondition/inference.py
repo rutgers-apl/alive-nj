@@ -239,7 +239,10 @@ def learn_boolean(feature_count, goods, bads):
   # generate clauses until all bad vectors are excluded
   while len(excludes) < len(bads):
     k += 1
-    assert k <= feature_count # FIXME
+    if k > feature_count:
+      log.error('Unable to learn boolean\n%s\n%s', goods, bads)
+      raise Exception('Unable to learn boolean')
+
     reporter.increase_clause_size()
     clauses.extend(c for c in all_clauses(feature_count, k)
       if consistent_clause(c, goods))
@@ -818,8 +821,7 @@ def interpret_opt(smt, opt, strengthen=False):
   """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
   """
 
-  if strengthen:
-    assert opt.pre
+  if strengthen and opt.pre:
     pre = smt(opt.pre)
     safe = pre.safe + pre.defined + pre.nonpoison + [pre.value]
   else:
