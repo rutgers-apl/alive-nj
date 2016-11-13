@@ -1,0 +1,8 @@
+; Program 147
+; Alive Infer Precondition: Pre: (width(%2) u< C3 && (!isPowerOf2(C3) || C3 < 0))
+
+%1 = sub nsw i32 0, %0
+%2 = and %0, %1
+%3 = icmp eq C3, %2
+=>
+%3 = 0
