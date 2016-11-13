@@ -1,0 +1,10 @@
+; Program 702
+; Alive Infer Partial precondition: Pre: C3 u< C4
+
+%1 = icmp ne i32 C1, %0
+%2 = zext %1 to i32
+%3 = or C2, %2
+%4 = urem C3, %3
+%5 = icmp ne C4, %4
+=>
+%5 = 1

@@ -1,0 +1,9 @@
+; Program 395
+; Alive Infer Partial precondition: Pre: (isSignBit(C2) && C3 != 0 && C3 u<= 1)
+
+
+%1 = and i32 C1, %0
+%2 = srem C2, %1
+%3 = icmp eq C3, %2
+=>
+%3 = 0

@@ -1,0 +1,8 @@
+; Program 296
+; Alive Infer Partial Precondition: Pre: (isSignBit(C1) && (C2 / width(%0)) == 0)
+
+%1 = sext i32 %0 to i64
+%2 = sdiv C1, %1
+%3 = icmp ne C2, %2
+=>
+%3 = 1

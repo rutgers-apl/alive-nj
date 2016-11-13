@@ -1,0 +1,8 @@
+; Program 540
+
+%1 = lshr i32 %0, C1
+%2 = xor C2, %1
+%3 = udiv C3, %2
+%4 = icmp ne C4, %3
+=>
+%4 = 1

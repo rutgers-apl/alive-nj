@@ -1,0 +1,6 @@
+; Program 341
+
+%1 = sub nsw i32 C1, %0
+%2 = icmp ne %0, %1
+=>
+%2 = 1

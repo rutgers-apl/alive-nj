@@ -1,0 +1,9 @@
+; Program 139
+
+%1 = icmp slt i32 %0, C1
+%2 = lshr %0, C2
+%3 = sub nsw C3, %0
+%4 = select %1, %2, %3
+%5 = icmp eq C4, %4
+=>
+%5 = 0

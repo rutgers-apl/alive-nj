@@ -1,0 +1,9 @@
+; Program 385
+; Alive Infer preconditon: Pre: ((C1 - C2) == 0 && (C2 - 1) != 0)
+
+%1 = icmp eq i32 C1, %0
+%2 = zext %1 to i32
+%3 = select %1, %2, %0
+%4 = icmp eq C2, %3
+=>
+%4 = 0

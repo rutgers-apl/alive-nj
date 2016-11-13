@@ -1,0 +1,6 @@
+; Program 497
+
+%1 = sdiv i32 C1, %0
+%2 = icmp eq C2, %1
+=>
+%2 = 0

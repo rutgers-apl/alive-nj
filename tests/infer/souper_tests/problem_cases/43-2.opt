@@ -1,0 +1,11 @@
+; Program 702
+; Alive Partial Precondition: Pre: ((~C2 & C3) u< C4 && (~C3 & C4) u>= width(%0))
+
+
+%1 = icmp ne i32 0, %0
+%2 = zext %1 to i32
+%3 = or C2, %2
+%4 = urem C3, %3
+%5 = icmp ne 0, %4
+=>
+%5 = 1

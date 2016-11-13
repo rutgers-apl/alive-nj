@@ -1,0 +1,8 @@
+; Program 202
+; Partial precondition: Pre: (C1 u<= 1 && (C1 & C2) == 0 && (C2 u>> width(%0)) != 0)
+
+%1 = sext i16 %0 to i32
+%2 = sdiv C1, %1
+%3 = icmp ne C2, %2
+=>
+%3 = 1

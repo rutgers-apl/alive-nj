@@ -1,0 +1,8 @@
+; Program 296
+; Alive Infer Precondition: Pre: (((-C1 u>> width(%0)) != 0 || (-C1 << width(%0)) < 0) && ((C1 u>> width(%0)) != 0 || (C1 << width(%0)) < 0))
+
+%1 = sext i32 %0 to i64
+%2 = sdiv C1, %1
+%3 = icmp ne 0, %2
+=>
+%3 = 1

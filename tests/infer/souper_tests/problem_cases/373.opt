@@ -1,0 +1,8 @@
+; Program 373
+
+%1 = zext i8 %0 to i32
+%3 = icmp ne i32 C1, %2
+%4 = sext %3 to i32
+%5 = icmp slt %1, %4
+=>
+%5 = 0

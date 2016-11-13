@@ -1,0 +1,8 @@
+; Program 537
+; Alive Infer Preconditon: Pre: (C3 == 0 && (C1 u>> C2) == 0)
+
+%1 = srem i32 C1, %0
+%2 = lshr %1, C2
+%3 = icmp ne C3, %2
+=>
+%3 = 0

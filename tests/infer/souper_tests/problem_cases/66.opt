@@ -1,0 +1,9 @@
+; Program 66
+
+%1 = icmp slt i32 C1, %0
+%2 = sext %1 to i32
+%4 = icmp eq C2, %3
+%5 = zext %4 to i32
+%6 = icmp sle %2, %5
+=>
+%6 = 1

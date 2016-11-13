@@ -1,0 +1,7 @@
+; Alive infer result without nsw Pre: (width(%r) & C1) == 0
+; This example hangs the engine
+; Same behavior with Alive-NJ without Infer
+%y = mul nsw i32 C1, %x
+%r = icmp eq 1, %y
+=>
+%r = 0
