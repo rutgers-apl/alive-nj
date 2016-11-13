@@ -1314,6 +1314,7 @@ def main(
     assume_pre = False,
     pre_features = False,
     incompletes = True,
+    first_only = False,
     use_assumptions = True,
     use_features = True,
     echo = True,
@@ -1344,6 +1345,9 @@ def main(
   parser.add_argument('--incompletes', action=NegatableFlag,
     default=incompletes,
     help='Report too-strong preconditions during inference')
+  parser.add_argument('--first-only', action=NegatableFlag,
+    default=first_only,
+    help='Stop after the first valid precondition')
   parser.add_argument('--assumptions', action=NegatableFlag,
     default=use_assumptions,
     help='Use assumptions in Assume: headers')
@@ -1395,6 +1399,9 @@ def main(
       solver_bad = solver_negatives,
       incompletes = args.incompletes,
       conflict_set = cs_strategies[args.strategy])
+
+    if args.first_only:
+      pres = itertools.islice(pres, 1)
 
     try:
       for pre, coverage, ifeatures in pres:
