@@ -1363,7 +1363,7 @@ def main(
   args = parser.parse_args()
 
   for opt,features,assumes in read_opt_files(args.file, extended_results=True):
-    print '-----'
+    print '; -----'
 
     if not args.assumptions:
       assumes = []
@@ -1411,19 +1411,20 @@ def main(
 ; accepted features {0.features:,}
 ; total features tested {0.generated_features:,}'''.format(reporter,coverage)
         sys.stdout.flush()
+
+      if args.weakest:
+        reporter.clear_message()
+        print '; precondition is complete'
+
     except NoPositives:
       reporter.clear_message()
-      print 'No positive instances'
+      print '; Failure: No positive instances'
     except MissingFalsePositives:
       reporter.clear_message()
-      print '; Validity not proven'
+      print '; Failure: Validity not proven'
     except MissingFalseNegatives:
       reporter.clear_message()
-      print '; Completeness not proven'
-
-    if args.weakest:
-      reporter.clear_message()
-      print '; precondition is complete'
+      print '; Failure: Completeness not proven'
 
 if __name__ == '__main__':
   main()
