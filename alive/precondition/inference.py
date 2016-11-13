@@ -1155,6 +1155,8 @@ def infer_precondition(opt,
     reporter.clear_message()
     log.info('Given precondition: %s', msg)
     print ';', msg
+    import sys
+    sys.stdout.flush()
   # ----
 
   config = enumerator.Config(ty_symbols, reps, type_model)
