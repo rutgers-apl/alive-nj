@@ -43,7 +43,8 @@ class StatusReporter(object):
     if not self.quiet:
       self.clear()
       print '----------'
-      print opt.format()
+      #print opt.format()
+      opt.format().write_to(sys.stdout, width=self.width)
       print
 
     self.write_status()

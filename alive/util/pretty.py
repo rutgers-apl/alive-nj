@@ -237,21 +237,27 @@ class Doc(PrettyRepr):
 
   def write_to(self, file, width=80, indent=0, **kws):
     """Write this doc to the specified file."""
-    out = GrowGroups(AddHP(
-      FindGroupEnds(width, TextEvents(width, file.write, **kws))))
-    self.send(out, indent)
-    out.flush()
+    out = grow_groups(add_hp(
+      find_group_ends(width, text_events(width, file.write, **kws))))
+
+    out.next()
+    self.send_to(out, indent)
+    out.close()
 
   def oneline(self):
     """Convert this Doc to a one-line string."""
     sbuf = StringIO.StringIO()
-    def out(event):
-      if event[0] == Doc.Text:
-        sbuf.write(event[1])
-      elif event[0] == Doc.Line:
-        sbuf.write(' ')
+    def dump():
+      while True:
+        event = yield
+        if event[0] == Doc.Text:
+          sbuf.write(event[1])
+        elif event[0] == Doc.Line:
+          sbuf.write(' ')
 
-    self.send(out, 0)
+    out = dump()
+    out.next()
+    self.send_to(out, 0)
     return sbuf.getvalue()
 
   def pretty(self):
@@ -265,24 +271,24 @@ class _Text(Doc):
     assert '\n' not in text
     self.text = text
 
-  def send(self, out, indent):
-    out((Doc.Text, self.text))
+  def send_to(self, out, indent):
+    out.send((Doc.Text, self.text))
 
   def __nonzero__(self):
     return bool(self.text)
 
 class _Line(Doc):
   __slots__ = ()
-  def send(self, out, indent):
-    out((Doc.Line, indent))
+  def send_to(self, out, indent):
+    out.send((Doc.Line, indent))
 
   def __repr__(self):
     return '_Line()'
 
 class _Break(Doc):
   __slots__ = ()
-  def send(self, out, indent):
-    out((Doc.Break, indent))
+  def send_to(self, out, indent):
+    out.send((Doc.Break, indent))
 
   def __repr__(self):
     return '_Break()'
@@ -296,19 +302,19 @@ class _Group(Doc):
     assert bool(doc)
     self.doc = doc # need to normalize this. maybe before construction?
 
-  def send(self, out, indent):
-    out((Doc.GBegin,))
-    self.doc.send(out, indent)
-    out((Doc.GEnd,))
+  def send_to(self, out, indent):
+    out.send((Doc.GBegin,))
+    self.doc.send_to(out, indent)
+    out.send((Doc.GEnd,))
 
 class _Seq(Doc):
   __slots__ = ('docs',)
   def __init__(self, docs):
     self.docs = docs
 
-  def send(self, out, indent):
+  def send_to(self, out, indent):
     for doc in self.docs:
-      text(doc).send(out, indent)
+      text(doc).send_to(out, indent)
 
   def __nonzero__(self):
     return any(bool(doc) for doc in self.docs)
@@ -320,8 +326,8 @@ class _Nest(Doc):
     self.indent = indent
     self.doc = doc
 
-  def send(self, out, indent):
-    self.doc.send(out, indent + self.indent)
+  def send_to(self, out, indent):
+    self.doc.send_to(out, indent + self.indent)
 
   def __nonzero__(self):
     return bool(self.doc)
@@ -331,8 +337,8 @@ class _Pretty(Doc):
   def __init__(self, obj):
     self.obj = obj
 
-  def send(self, out, indent):
-    self.obj.pretty().send(out, indent)
+  def send_to(self, out, indent):
+    self.obj.pretty().send_to(out, indent)
 
 
 
@@ -343,82 +349,89 @@ def joinit(iterable, delimiter):
     yield delimiter
     yield x
 
-
-class GrowGroups(object):
-  '''Delays GEnd event until the next Line or Break.
+def grow_groups(next):
+  """Delays GEnd event until the next Line or Break.
 
   If a group is immediately followed by trailing text, we should take it
   into account when choosing whether to break the group. This stream
   transformer pushes GEnds past any trailing text.
 
-  Furthermore, since GBegin can always be moved past text, GrowGroups also
+  Furthermore, since GBegin can always be moved past text, grow_groups also
   pushes them to the right as far as possible. This will eliminate some
   groups if they contain only text.
-  '''
-  def __init__(self, next):
-    self.next = next
-    self.pushing = 0    # number of GEnds being delayed
-    self.pushing_b = 0  # number of GBegins being delayed
 
-  def __call__(self, event):
-    if event[0] == Doc.Text:
-      self.next(event)
-    elif event[0] == Doc.GBegin:
-      if self.pushing:
-        self.pushing_b += 1
+  This avoids the problem where a group is just short enough to fit on a line,
+  but is immediately followed by text, such as a comma, which will then go
+  past the right margin.
+
+  Be sure to call close() to send any suspended GEnds downstream.
+  """
+  next.next()
+  pushing = 0
+  pushing_b = 0
+
+  try:
+    while True:
+      event = yield
+      if event[0] == Doc.Text:
+        next.send(event)
+      elif event[0] == Doc.GBegin:
+        if pushing:
+          pushing_b += 1
+        else:
+          next.send(event)
+      elif event[0] == Doc.GEnd:
+        if pushing_b:
+          pushing_b -= 1
+        else:
+          pushing += 1
       else:
-        self.next(event)
-    elif event[0] == Doc.GEnd:
-      if self.pushing_b:
-        self.pushing_b -= 1
-      else:
-        self.pushing += 1
-    else:
-      self.flush()
-      self.next(event)
+        while pushing:
+          next.send((Doc.GEnd,))
+          pushing -= 1
+        while pushing_b:
+          next.send((Doc.GBegin,))
+          pushing_b -= 1
+        next.send(event)
+  finally:
+    while pushing:
+      next.send((Doc.GEnd,))
+      pushing -= 1
+    while pushing_b:
+      next.send((Doc.GBegin,))
+      pushing_b -= 1
 
-  def flush(self):
-    '''Stream any delayed GEnds and GBegins.
 
-    Unless the stream terminates with a line break, or contains no groups,
-    GrowGroups will hang on to the final GEnd(s) unless they are flushed out.
-    '''
-    while self.pushing:
-      self.next((Doc.GEnd,))
-      self.pushing -= 1
-    while self.pushing_b:
-      self.next((Doc.GBegin,))
-      self.pushing_b -= 1
-
-class AddHP(object):
-  '''Annotate events with their horizontal position.
+def add_hp(next):
+  """Annotate events with their horizontal position.
 
   Assuming an infinitely-wide canvas, how many characters to the right is the
   _end_ of this event.
-  '''
+  """
+  next.next()
+  pos = 0
 
-  def __init__(self, next):
-    self.next = next
-    self.pos = 0
+  while True:
+    event = yield
 
-  def __call__(self, event):
     if event[0] == Doc.Text:
-      self.pos += len(event[1])
-      self.next((Doc.Text, self.pos, event[1]))
+      pos += len(event[1])
+      next.send((Doc.Text, pos, event[1]))
 
     elif event[0] == Doc.Line:
-      self.pos += 1
-      self.next((Doc.Line, self.pos, event[1]))
+      pos += 1
+      next.send((Doc.Line, pos, event[1]))
 
     elif event[0] == Doc.Break:
-      self.next((Doc.Break, self.pos, event[1]))
+      next.send((Doc.Break, pos, event[1]))
 
     else:
-      self.next((event[0], self.pos))
+      next.send((event[0], pos))
 
 
 class Buf(object):
-  'Sequence type providing O(1) insert at either end, and O(1) concatenation.'
+  """Sequence type providing O(1) insert at either end, and O(1) concatenation.
+  """
 
   def __init__(self):
     self.head = []
@@ -445,127 +458,133 @@ class Buf(object):
       yield crnt[0]
       crnt = crnt[1]
 
-
-class AddGBeginPos(object):
-  '''
-  Annotate GBegin events with the horizontal position of the end of the group.
+def add_GBegin_pos(next):
+  """Annotate GBegin events with the horizontal position of the end of the
+  group.
 
   Because this waits until the entire group has been seen, so its latency and
   memory use are unbounded.
-  '''
-  def __init__(self, next):
-    self.next = next
-    self.bufs = []
+  """
+  next.next()
+  bufs = []
 
-  def __call__(self, event):
+  while True:
+    event = yield
+
     if event[0] == Doc.GBegin:
-      self.bufs.append(Buf())
+      bufs.append(Buf())
 
-    elif self.bufs and event[0] == Doc.GEnd:
+    elif bufs and event[0] == Doc.GEnd:
       pos = event[1]
-      buf = self.bufs.pop()
+      buf = bufs.pop()
       buf.append_left((Doc.GBegin, pos))
       buf.append(event)
+
       if bufs:
-        bufs[-1].extend(buf)
+        buf[-1].extend(buf)
       else:
         for event in buf:
-          self.next(event)
+          next.send(event)
 
-    elif self.bufs:
+    elif bufs:
       bufs[-1].append(event)
 
     else:
-      self.next(event)
+      next.send(event)
 
-class FindGroupEnds(object):
-  '''
-  Annotate GBegin events with the horizontal position of the end of the group.
+
+def find_group_ends(width, next):
+  """Annotate GBegin events with the horizontal position of the end of the
+  group.
 
   GBegins corresponding to groups larger than the width will be annotated with
   'None'. This keeps memory usage and latency bounded, at the cost of some
   potential inaccuracy. (Zero-width groups may cause FindGroupEnds to declare
-  a group too long, even if it is not.)
-  '''
-  def __init__(self, width, next):
-    self.next = next
-    self.width = width
-    self.bufs = deque()
+  a group too long, even if it is not.) Assumes that all groups have non-zero
+  widths.
+  """
+  next.next()
+  bufs = deque()
+    # each entry in the queue corresponds to an incomplete group and contains
+    # (1) the rightmost horizontal position this group can contain while staying
+    #     on a line
+    # (2) a Buf() containing the events of this group so far
 
-  def __call__(self, event):
-    if self.bufs:
+  while True:
+    event = yield
+    if bufs:
       if event[0] == Doc.GEnd:
-        _, buf = self.bufs.pop()
+        _, buf = bufs.pop()
         buf.append_left((Doc.GBegin, event[1]))
         buf.append((Doc.GEnd, event[1]))
-        if self.bufs:
-          self.bufs[-1][1].extend(buf)
+        if bufs:
+          bufs[-1][1].extend(buf)
         else:
-          for event in buf:
-            self.next(event)
+          for e in buf:
+            next.send(e)
 
       else:
         if event[0] == Doc.GBegin:
-          self.bufs.append((event[1] + self.width, Buf()))
+          bufs.append((event[1] + width, Buf()))
         else:
-          self.bufs[-1][1].append(event)
+          bufs[-1][1].append(event)
 
-        while self.bufs[0][0] < event[1] or len(self.bufs) > self.width:
-          self.next((Doc.GBegin, None))
-          _, buf = self.bufs.popleft()
+        while bufs[0][0] < event[1] or len(bufs) > width:
+          next.send((Doc.GBegin, None))
+          _, buf = bufs.popleft()
           for e in buf:
-            self.next(e)
+            next.send(e)
 
-          if not self.bufs:
+          if not bufs:
             break
 
     elif event[0] == Doc.GBegin:
-      self.bufs.append((event[1] + self.width, Buf()))
-    else:
-      self.next(event)
+      bufs.append((event[1] + width, Buf()))
 
-class TextEvents(object):
+    else:
+      next.send(event)
+
+def text_events(width, out, prefix='', start_at=0):
   """Write an annotated event stream to some method.
 
   Arguments:
     width - Desired maximum width for printing
     out   - A function which accepts strings (e.g. sys.stdout.write)
   Keywords:
-    prefix - A string to put the start of each line. This counts against
-             the given width.
+    prefix - A string to put the start of each subsequent line. This counts
+             against the given width.
     start_at - Assume this many characters have been printed on the first line
   """
+  width -= len(prefix)
+  newline = '\n' + prefix
+  fits = 0
+  hpl = width - start_at
 
-  def __init__(self, width, out, prefix='', start_at=0):
-    self.width = width - len(prefix)
-    self.newline = '\n' + prefix
-    self.out = out
-    self.fits = 0
-    self.hpl = width - start_at
+  while True:
+    event = yield
 
-  def __call__(self, event):
     if event[0] == Doc.Text:
-      self.out(event[2])
+      out(event[2])
     elif event[0] == Doc.Line:
-      if self.fits:
-        self.out(' ')
+      if fits:
+        out(' ')
       else:
-        self.out(self.newline)
-        self.out(' ' * event[2])
-        self.hpl = event[1] + self.width - event[2]
+        out(newline)
+        out(' ' * event[2])
+        hpl = event[1] + width - event[2]
     elif event[0] == Doc.Break:
-      if not self.fits:
-        self.out(self.newline)
-        self.out(' ' * event[2])
-        self.hpl = event[1] + self.width - event[2]
+      if not fits:
+        out(newline)
+        out(' ' * event[2])
+        hpl = event[1] + width - event[2]
     elif event[0] == Doc.GBegin:
-      if self.fits:
-        self.fits += 1
-      elif event[1] != None and event[1] <= self.hpl:
-        self.fits = 1
+      if fits:
+        fits += 1
+      elif event[1] != None and event[1] <= hpl:
+        fits = 1
     else:
-      if self.fits:
-        self.fits -= 1
+      if fits:
+        fits -= 1
 
 
 line = _Line()
@@ -610,17 +629,25 @@ def pset(set):
 
 
 def block_print(obj, width=80):
-  next = GrowGroups(AddHP(FindGroupEnds(width, TextEvents(width, sys.stdout.write))))
+  def blk(next):
+    next.next()
+    try:
+      while True:
+        event = yield
+        if event[0] == Doc.Line or event[0] == Doc.Break:
+          next.send((Doc.GBegin,))
+          next.send((event[0],0))
+          next.send((Doc.GEnd,))
 
-  def blk(event):
-    if event[0] == Doc.Line or event[0] == Doc.Break:
-      next((Doc.GBegin,))
-      next((event[0],0))
-      next((Doc.GEnd,))
+        elif event[0] == Doc.Text:
+          next.send(event)
+    finally:
+      next.close()
 
-    elif event[0] == Doc.Text:
-      next(event)
+  it = blk(grow_groups(add_hp(find_group_ends(width,
+    text_events(width, sys.stdout.write)))))
 
-  text(obj).send(blk, 0)
-  next.flush()
+  it.next()
+  text(obj).send_to(it, 0)
+  it.close()
   sys.stdout.write('\n')
