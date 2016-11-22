@@ -10,9 +10,10 @@ from functools import partial
 import z3, operator, logging
 import types
 import collections
+from contextlib import contextmanager
 
 # Z3 changed the API slightly after 4.4.1. This patches the old API
-# to look like the new one. 
+# to look like the new one.
 # TODO: remove once we can drop support for 4.4.1
 if hasattr(z3, 'fpIsInfinite'):
   _fpFP = z3.fpFP
@@ -22,6 +23,7 @@ if hasattr(z3, 'fpIsInfinite'):
 logger = logging.getLogger(__name__)
 
 # FIXME: assumes 64-bit pointers
+# TODO: move into BaseSMTTranslator
 def _ty_sort(ty):
   'Translate a Type expression to a Z3 Sort'
 
@@ -38,6 +40,8 @@ def _ty_sort(ty):
     }[type(ty)]
     # NOTE: this assumes the global z3 context never changes
 
+Interp = collections.namedtuple('Interp',
+  'value defined nonpoison safe aux qvars')
 
 class MetaTranslator(type):
   def __init__(cls, name, bases, dict):
@@ -53,45 +57,110 @@ class BaseSMTTranslator():
   def __init__(self, type_model):
     self.types = type_model
     self.fresh = 0
-    self.defs = []  # current defined-ness conditions
-    self.nops = []  # current non-poison conditions
-    self.qvars = []
+    self.reset()
     self.attrs = collections.defaultdict(dict)
       # term -> attr -> var
 
-  def eval(self, term):
-    '''smt.eval(term) -> Z3 expression
+  def reset(self):
+    self.defs = []  # current defined-ness conditions
+    self.nops = []  # current non-poison conditions
+    self._safe = [] # current safety conditions
+    self._aux  = [] # current auxiliary conditions
+    self.qvars = []
 
-    Translate the term (and subterms), adding its definedness conditons,
-    nonpoison conditions, and quantifier variables to the state.
-    '''
+  def eval(self, term):
+    """Return the SMT translation of the term. Any side conditions are added
+    to the translator context.
+    """
     logger.debug('eval %s', term)
     return eval(term, self)
 
   def __call__(self, term):
-    '''smt(term) -> Z3 expression, def conds, nonpoison conds, qvars
-
-    Clear the current state, translate the term (and subterms), and
-    return the translation, definedness conditions, nonpoison conditions,
-    and quantified variables.
+    """Interpret the term in a fresh translator context.
 
     Quantified variables are guaranteed to be unique between different
     calls to the same SMTTranslator object.
-    '''
+    """
+    # WARNING: calling eval after __call__ will modify the Interp
+    # returned by __call__. Maybe better to clear everything after calling
+    # eval? Perhaps best to clear both, but that wastes effort.
     logger.debug('call %s', term)
-    self.defs = []
-    self.nops = []
-    self.qvars = []
+    self.reset()
     v = eval(term, self)
-    return v, self.defs, self.nops, self.qvars
+    return Interp(
+      value = v,
+      defined = self.defs,
+      nonpoison = self.nops,
+      safe = self._safe,
+      aux = self._aux,
+      qvars = self.qvars,
+    )
 
   def add_defs(self, *defs):
+    """Add well-defined conditions to the current translator context.
+    """
     self.defs += defs
 
-  def add_nops(self, *nops):
-    self.nops += nops
-  
+  def add_nonpoison(self, *nonpoisons):
+    """Add non-poison conditions to current translator context.
+    """
+    self.nops += nonpoisons
+
+  add_nops = add_nonpoison
+
+  @contextmanager
+  def local_nonpoison(self):
+    """Create a context with nonpoison conditions independent from any prior
+    conditions.
+
+    Returns the list of safety conditions associated with the operations in
+    the context.
+
+    Usage:
+      with smt.local_nonpoison() as s:
+        <operations>
+    """
+    old = self.nops
+    try:
+      new = []
+      self.nops = new
+      yield new
+    finally:
+      self.nops = old
+
+  def add_safe(self, *safe):
+    """Add safety conditions to the current translator context.
+    """
+    self._safe += safe
+
+  @contextmanager
+  def local_safe(self):
+    """Create a context with safety conditions independent from any prior
+    conditions.
+
+    Returns the list of safety conditions associated with the operations in
+    the context.
+
+    Usage:
+      with smt.local_safe() as s:
+        <operations>
+    """
+    old = self._safe
+    try:
+      new = []
+      self._safe = new
+      yield new
+    finally:
+      self._safe = old
+
+  def add_aux(self, *auxs):
+    """Add auxiliary conditions to the current translator context.
+    """
+    self._aux += auxs
+
   def add_qvar(self, *qvars):
+    """Add quantified variables to the current translator context.
+    """
     self.qvars += qvars
 
   def type(self, term):
@@ -217,7 +286,7 @@ class BaseSMTTranslator():
       return op(*args)
 
     c = self.fresh_bool()
-    self.add_defs(z3.Implies(c, op(*args)))
+    self.add_aux(z3.Implies(c, op(*args)))
     return c
 
   def _has_attr(self, attr, term):
@@ -343,7 +412,7 @@ eval.register(FRemInst, BaseSMTTranslator, fbinop(z3.fpRem))
 def _eval_bitcast(src, tgt, v):
   """
   Return SMT expression converting v from src to tgt.
-  
+
   Assumes src and tgt have the same bit width.
   """
   raise NotImplementedError
@@ -419,7 +488,7 @@ def _fptrunc(term, smt):
   tgt = smt.type(term)
   e = 2**(tgt.exp-1) # max exponent + 1
   m = 2**e
-  
+
   rm = z3.get_default_rounding_mode()
   return smt._conditional_conv_value(
     [v > -m, v < m],
@@ -624,7 +693,7 @@ def _signbits(term, smt):
   #b = ComputeNumSignBits(smt.fresh_bv(size), size)
   b = smt.fresh_var(ty, 'ana_')
 
-  smt.add_defs(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
+  smt.add_aux(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
 
   return b
 
@@ -633,8 +702,7 @@ def _ones(term, smt):
   x = smt.eval(term._args[0])
   b = smt.fresh_var(smt.type(term), 'ana_')
 
-  smt.add_defs(b & ~x == 0)
-  # FIXME: does this make sense in the target?
+  smt.add_aux(b & ~x == 0)
 
   return b
 
@@ -642,9 +710,9 @@ def _ones(term, smt):
 def _zeros(term, smt):
   x = smt.eval(term._args[0])
   b = smt.fresh_var(smt.type(term), 'ana_')
+  # FIXME: make sure each reference to this analysis is the same
 
-  smt.add_defs(b & x == 0)
-  # FIXME: does this make sense in the target?
+  smt.add_aux(b & x == 0)
 
   return b
 

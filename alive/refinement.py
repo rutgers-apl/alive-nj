@@ -23,31 +23,41 @@ def check(opt, type_model, translator=config.translator):
   smt = translator(type_model)
 
   if opt.pre:
-    pb,pd,_,_ = smt(opt.pre)
-    pd.append(pb)
+    pre = smt(opt.pre)
+    assert not pre.defined and not pre.nonpoison and not pre.qvars
+      # TODO: make this an exception, or do something reasonable for these
+      # it is unclear what qvars in the precondition would mean
+    premise = pre.aux + [pre.value]
   else:
-    pd = []
+    premise = []
 
-  sv,sd,sp,qvars = smt(opt.src)
-  sd += pd
+  src = smt(opt.src)
+  assert not src.aux
+  # TODO: exception here? Nothing in the source should have analysis
+  premise += src.defined
+  if config.poison_undef:
+    premise += src.nonpoison
 
-  tv,td,tp,_ = smt(opt.tgt)
+  tgt = smt(opt.tgt)
+  premise += tgt.aux
 
   def err(c, m):
-    return CounterExampleError(c, m, type_model, opt.src, sv, tv, translator)
+    return CounterExampleError(
+      c, m, type_model, opt.src, src.value, tgt.value, translator)
 
-  if td:
-    if config.poison_undef:
-      expr = sd + sp + [mk_not(td)]
-    else:
-      expr = sd + [mk_not(td)]
+  if tgt.defined:
+    expr = premise + [mk_not(tgt.defined)]
+    check_expr(UB, mk_forall(src.qvars, expr), opt, err)
 
-    check_expr(UB, mk_forall(qvars, expr), opt, err)
+  if not config.poison_undef:
+    premise += src.nonpoison
 
-  if tp:
-    check_expr(POISON, mk_forall(qvars, sd + sp + [mk_not(tp)]), opt, err)
+  if tgt.nonpoison:
+    check_expr(POISON,
+      mk_forall(src.qvars, premise + [mk_not(tgt.nonpoison)]), opt, err)
 
-  check_expr(UNEQUAL, mk_forall(qvars, sd + sp + [z3.Not(sv == tv)]), opt, err)
+  check_expr(UNEQUAL,
+    mk_forall(src.qvars, premise + [z3.Not(src.value == tgt.value)]), opt, err)
 
 _stage_name = {
   UB:      'undefined behavior',
@@ -72,7 +82,7 @@ def check_expr(stage, expr, opt, err):
   time0 = time.time()
   res = s.check()
   time1 = time.time()
-  
+
   solve_time = time1 - time0
 
   if logger.isEnabledFor(logging.INFO):
@@ -163,6 +173,7 @@ class CounterExampleError(Error):
       rows.append((ty,name, format_z3val(self.model.evaluate(smt.eval(v), True))))
         # it shouldn't matter that these will get new qvars,
         # because those will just get defaulted anyway
+        # FIXME: check for poison
       if len(ty) > ty_width: ty_width = len(ty)
       if len(name) > name_width: name_width = len(name)
 
