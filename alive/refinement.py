@@ -14,7 +14,7 @@ from .z3util import mk_and, mk_not, mk_forall
 
 logger = logging.getLogger(__name__)
 
-UB, POISON, UNEQUAL = range(3)
+PRESAFE, TGTSAFE, UB, POISON, UNEQUAL = range(5)
 
 def check(opt, type_model, translator=config.translator):
   logger.info('Checking refinement of %r', opt.name)
@@ -28,15 +28,14 @@ def check(opt, type_model, translator=config.translator):
       # TODO: make this an exception, or do something reasonable for these
       # it is unclear what qvars in the precondition would mean
     premise = pre.aux + [pre.value]
+    pre_safe = pre.safe
   else:
+    pre_safe = []
     premise = []
 
   src = smt(opt.src)
   assert not src.aux
   # TODO: exception here? Nothing in the source should have analysis
-  premise += src.defined
-  if config.poison_undef:
-    premise += src.nonpoison
 
   tgt = smt(opt.tgt)
   premise += tgt.aux
@@ -44,6 +43,16 @@ def check(opt, type_model, translator=config.translator):
   def err(c, m):
     return CounterExampleError(
       c, m, type_model, opt.src, src.value, tgt.value, translator)
+
+  if pre_safe:
+    check_expr(PRESAFE, mk_not(pre_safe), opt, err)
+
+  if tgt.safe:
+    check_expr(TGTSAFE, mk_and(premise + [mk_not(tgt.safe)]), opt, err)
+
+  premise += src.defined
+  if config.poison_undef:
+    premise += src.nonpoison
 
   if tgt.defined:
     expr = premise + [mk_not(tgt.defined)]
@@ -60,6 +69,8 @@ def check(opt, type_model, translator=config.translator):
     mk_forall(src.qvars, premise + [z3.Not(src.value == tgt.value)]), opt, err)
 
 _stage_name = {
+  PRESAFE: 'precondition safety',
+  TGTSAFE: 'target safety',
   UB:      'undefined behavior',
   POISON:  'poison',
   UNEQUAL: 'equality',
@@ -140,6 +151,8 @@ class CounterExampleError(Error):
     self.trans = trans
 
   cause_str = {
+    PRESAFE: 'Precondition is unsafe',
+    TGTSAFE: 'Target is unsafe',
     UB:      'Target introduces undefined behavior',
     POISON:  'Target introduces poison',
     UNEQUAL: 'Mismatch in values',

@@ -643,28 +643,54 @@ def _poison(term, smt):
 #       is this reasonable?
 # FIXME: div/rem by 0 is undef
 # NOTE: better to use _handler here instead binop?
+
+def _cbinop(op, safe):
+  def handler(term, smt):
+    x = smt.eval(term.x)
+    y = smt.eval(term.y)
+
+    smt.add_safe(safe(x,y))
+
+    return op(x,y)
+
+  return handler
+
 eval.register(AddCnxp, BaseSMTTranslator, binop(operator.add))
 eval.register(SubCnxp, BaseSMTTranslator, binop(operator.sub))
 eval.register(MulCnxp, BaseSMTTranslator, binop(operator.mul))
-#eval.register(SDivCnxp, BaseSMTTranslator, binop(operator.div))
-eval.register(UDivCnxp, BaseSMTTranslator, binop(z3.UDiv))
-eval.register(SRemCnxp, BaseSMTTranslator, binop(operator.mod))
-eval.register(URemCnxp, BaseSMTTranslator, binop(z3.URem))
+eval.register(UDivCnxp, BaseSMTTranslator, _cbinop(z3.UDiv, lambda x,y: y != 0))
+
+# LLVM 3.8.0 APInt srem implemented via urem
+# SMT-LIB does not appear to define srem
+eval.register(SRemCnxp, BaseSMTTranslator,
+  _cbinop(operator.mod, lambda x,y: y != 0))
+eval.register(URemCnxp, BaseSMTTranslator,
+  _cbinop(z3.URem, lambda x,y: y != 0))
+
+# LLVM 3.8.0 APInt specifically checks for too-large shifts and
+# returns 0. SMT-LIB also defines out-of-range shifts to be 0.
 eval.register(ShlCnxp, BaseSMTTranslator, binop(operator.lshift))
 eval.register(AShrCnxp, BaseSMTTranslator, binop(operator.rshift))
 eval.register(LShrCnxp, BaseSMTTranslator, binop(z3.LShR))
+
 eval.register(AndCnxp, BaseSMTTranslator, binop(operator.and_))
 eval.register(OrCnxp, BaseSMTTranslator, binop(operator.or_))
 eval.register(XorCnxp, BaseSMTTranslator, binop(operator.xor))
 
 # special case because Z3 4.4.1 doesn't do FP div correctly
+# LLVM 3.8.0 sdiv implemented via udiv
+# SMT-LIB does not appear to define sdiv
 @eval.register(SDivCnxp, BaseSMTTranslator)
 def _sdiv(term, smt):
   if isinstance(smt.type(term), FloatType):
     return z3.fpDiv(z3.get_current_rounding_mode(),
       smt.eval(term.x), smt.eval(term.y))
 
-  return smt.eval(term.x) / smt.eval(term.y)
+  x = smt.eval(term.x)
+  y = smt.eval(term.y)
+  smt.add_safe(y != 0)
+
+  return x / y
 
 eval.register(NotCnxp, BaseSMTTranslator,
   lambda term, smt: ~smt.eval(term.x))
@@ -811,11 +837,41 @@ def _width(term, smt):
 # Predicates
 # ----------
 
-eval.register(AndPred, BaseSMTTranslator,
-  lambda term, smt: mk_and([smt.eval(c) for c in term.clauses]))
+# FIXME: move mk_implies to z3util
+def mk_implies(premises, consequents):
+  if not consequents:
+    return []
 
-eval.register(OrPred, BaseSMTTranslator,
-  lambda term, smt: mk_or([smt.eval(c) for c in term.clauses]))
+  if premises:
+    return [z3.Implies(mk_and(premises), mk_and(consequents))]
+
+  return consequents
+
+@eval.register(AndPred, BaseSMTTranslator)
+def _(term, smt):
+  context = []
+
+  for c in term.clauses:
+    with smt.local_safe() as s:
+      p = smt.eval(c)
+
+    smt.add_safe(*mk_implies(context, s))
+    context.append(p)
+
+  return mk_and(context)
+
+@eval.register(OrPred, BaseSMTTranslator)
+def _(term, smt):
+  context = []
+
+  for c in term.clauses:
+    with smt.local_safe() as s:
+      p = smt.eval(c)
+
+    smt.add_safe(*mk_implies(map(z3.Not, context), s))
+    context.append(p)
+
+  return mk_or(context)
 
 eval.register(NotPred, BaseSMTTranslator,
   lambda term, smt: z3.Not(smt.eval(term.p)))
