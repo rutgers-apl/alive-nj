@@ -387,6 +387,8 @@ def _(term, fmt, prec):
 def _(term, fmt, prec):
   return pretty.group(
     'icmp ',
+    term.pred,
+    pretty.line,
     fmt.operand(term.x, 0, term.ty),
     ',',
     pretty.line,
@@ -394,12 +396,11 @@ def _(term, fmt, prec):
 
 @format_doc.register(L.FcmpInst)
 def _(term, fmt, prec):
-  flags = pretty.iter_seq(term.flags) + pretty.line if term.flags \
-    else pretty.seq()
-
   return pretty.group(
-    'fcmp ',
-    flags,
+    'fcmp',
+    pretty.iter_seq(pretty.seq(' ', f) for f in term.flags),
+    pretty.seq(' ', term.pred) if term.pred else '',
+    pretty.line if term.flags or term.pred else ' ',
     fmt.operand(term.x, 0, term.ty),
     ',',
     pretty.line,
