@@ -419,6 +419,11 @@ def _(term, fmt, prec):
     pretty.line,
     fmt.operand(term.arg2, 0, term.ty2)).nest(7)
 
+@format_doc.register(L.FreezeInst)
+def _(term, fmt, prec):
+  name = fmt.name(term)
+  return pretty.group('freeze ', fmt.operand(term.x, 0)).nest(7)
+
 @format_doc.register(L.Literal)
 @format_doc.register(L.FLiteral)
 def _(term, fmt, prec):

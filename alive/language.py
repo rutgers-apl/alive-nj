@@ -440,6 +440,22 @@ class SelectInst(Instruction):
     tcs.specific(self.arg2, self.ty2)
     tcs.eq_types(self, self.arg1, self.arg2)
 
+class FreezeInst(Instruction):
+  __slots__ = ('x', 'ty', 'name')
+
+  def __init__(self, x, ty = None, name = ''):
+    self.x = x
+    self.ty = ty
+    self.name = name
+
+  def args(self):
+    return (self.x,)
+
+  def type_constraints(self, tcs):
+    tcs.first_class(self)
+    tcs.eq_types(self, self.x)
+
+
 # Constants
 # ---------
 

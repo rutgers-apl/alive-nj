@@ -11,6 +11,7 @@ import z3, operator, logging
 import types
 import collections
 from contextlib import contextmanager
+import warnings
 
 # Z3 changed the API slightly after 4.4.1. This patches the old API
 # to look like the new one.
@@ -101,19 +102,39 @@ class BaseSMTTranslator():
     """
     self.defs += defs
 
+  @contextmanager
+  def local_defined(self):
+    """Create a context with well-defined conditions independent from any prior
+    conditions.
+
+    Returns the list of well-defined conditions associated with the operations
+    in the context.
+
+    Usage:
+      with smt.local_defined() as s:
+        <operations>
+    """
+    old = self.defs
+    try:
+      new = []
+      self.defs = new
+      yield new
+    finally:
+      self.defs = old
+
   def add_nonpoison(self, *nonpoisons):
     """Add non-poison conditions to current translator context.
     """
     self.nops += nonpoisons
 
-  add_nops = add_nonpoison
+  add_nops = add_nonpoison # TODO: deprecate
 
   @contextmanager
   def local_nonpoison(self):
     """Create a context with nonpoison conditions independent from any prior
     conditions.
 
-    Returns the list of safety conditions associated with the operations in
+    Returns the list of nonpoison conditions associated with the operations in
     the context.
 
     Usage:
@@ -280,7 +301,8 @@ class BaseSMTTranslator():
   }
 
   def _must_analysis(self, term, op):
-    args = (self.eval(a) for a in term._args)
+    with self.local_nonpoison(), self.local_defined():
+      args = [self.eval(a) for a in term._args]
 
     if all(isinstance(a, Constant) for a in term._args):
       return op(*args)
@@ -600,6 +622,11 @@ def _fcmp(term, smt):
 eval.register(SelectInst, BaseSMTTranslator,
   _handler(lambda c,x,y: z3.If(c == 1, x, y)))
 
+@eval.register(FreezeInst, BaseSMTTranslator)
+def _(term, smt):
+  warnings.warn("Ignoring freeze")
+
+  return smt.eval(term.x)
 
 # Constants
 # ---------
@@ -639,10 +666,6 @@ def _poison(term, smt):
   smt.add_nops(z3.BoolVal(False))
   return smt.fresh_var(smt.type(term))
 
-# NOTE: constant expressions do not introduce poison or definedness constraints
-#       is this reasonable?
-# FIXME: div/rem by 0 is undef
-# NOTE: better to use _handler here instead binop?
 
 def _cbinop(op, safe):
   def handler(term, smt):
@@ -655,6 +678,7 @@ def _cbinop(op, safe):
 
   return handler
 
+# NOTE: better to use _handler here instead binop?
 eval.register(AddCnxp, BaseSMTTranslator, binop(operator.add))
 eval.register(SubCnxp, BaseSMTTranslator, binop(operator.sub))
 eval.register(MulCnxp, BaseSMTTranslator, binop(operator.mul))
@@ -713,19 +737,22 @@ def _abs(term, smt):
 
 @eval.register(SignBitsCnxp, BaseSMTTranslator)
 def _signbits(term, smt):
-  x = smt.eval(term._args[0])
+  with smt.local_defined(), smt.local_nonpoison():
+    x = smt.eval(term._args[0])
   ty = smt.type(term)
 
   #b = ComputeNumSignBits(smt.fresh_bv(size), size)
   b = smt.fresh_var(ty, 'ana_')
 
   smt.add_aux(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
+  # FIXME: exact results for constants
 
   return b
 
 @eval.register(OneBitsCnxp, BaseSMTTranslator)
 def _ones(term, smt):
-  x = smt.eval(term._args[0])
+  with smt.local_defined(), smt.local_nonpoison():
+    x = smt.eval(term._args[0])
   b = smt.fresh_var(smt.type(term), 'ana_')
 
   smt.add_aux(b & ~x == 0)
@@ -734,7 +761,9 @@ def _ones(term, smt):
 
 @eval.register(ZeroBitsCnxp, BaseSMTTranslator)
 def _zeros(term, smt):
-  x = smt.eval(term._args[0])
+  with smt.local_defined(), smt.local_nonpoison():
+    x = smt.eval(term._args[0])
+
   b = smt.fresh_var(smt.type(term), 'ana_')
   # FIXME: make sure each reference to this analysis is the same
 
@@ -1001,6 +1030,63 @@ class SMTUndef(BaseSMTTranslator):
 
   _conditional_conv_value = _conditional_value
 
+
+class BaseBranchSelect(BaseSMTTranslator):
+  """Interpret select like a branch, only passing poison from the selected
+  argument.
+
+  Introduces poison for inputs.
+  """
+  pass
+
+@eval.register(SelectInst, BaseBranchSelect)
+def _(term, smt):
+  c = smt.eval(term.sel)
+
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.arg1)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.arg2)
+
+  if nx or ny:
+    smt.add_nonpoison(z3.If(c == 1, mk_and(nx), mk_and(ny)))
+
+  return z3.If(c == 1, x, y)
+
+@eval.register(Input, BaseBranchSelect)
+def _(term, smt):
+  ty = smt.type(term)
+  smt.add_nonpoison(z3.Bool('np_' + term.name))
+  return z3.Const(term.name, _ty_sort(ty))
+
+@eval.register(Symbol, BaseBranchSelect)
+def _(term, smt):
+  ty = smt.type(term)
+  return z3.Const(term.name, _ty_sort(ty))
+
+class PoisonOnly(BaseBranchSelect, SMTPoison):
+  pass
+
+@eval.register(FreezeInst, PoisonOnly)
+def _(term, smt):
+  with smt.local_nonpoison() as n:
+    x = smt.eval(term.x)
+
+  # if term is never poison, return it's interp directly
+  if not n:
+    return x
+
+  ty = smt.type(term)
+  u  = z3.Const('frozen_' + term.name, _ty_sort(ty))
+  # TODO: don't assume unique names
+
+  return z3.If(mk_and(n), x, u)
+
+@eval.register(UndefValue, PoisonOnly)
+def _(term, smt):
+  warnings.warn('Use of undef with poison-only semantics')
+  return eval.dispatch(UndefValue, BaseBranchSelect)(term, smt)
 
 class NewShlSemantics(BaseSMTTranslator):
   pass

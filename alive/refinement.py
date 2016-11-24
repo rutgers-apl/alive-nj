@@ -183,10 +183,15 @@ class CounterExampleError(Error):
     for v in vars:
       ty = str(self.types[typing.context[v]])
       name = v.name
-      rows.append((ty,name, format_z3val(self.model.evaluate(smt.eval(v), True))))
+      interp = smt(v)
+      if z3.is_false(self.model.evaluate(mk_and(interp.nonpoison))):
+        # better to check for is_true? can this ever be unevaluated?
+        rows.append((ty, name, 'poison'))
+      else:
+        rows.append(
+          (ty, name, format_z3val(self.model.evaluate(smt.eval(v), True))))
         # it shouldn't matter that these will get new qvars,
         # because those will just get defaulted anyway
-        # FIXME: check for poison
       if len(ty) > ty_width: ty_width = len(ty)
       if len(name) > name_width: name_width = len(name)
 
@@ -194,8 +199,12 @@ class CounterExampleError(Error):
     for ty,name,val in rows:
       print '{0:>{1}} {2:{3}} = {4}'.format(ty,ty_width,name,name_width,val)
 
-    src_v = self.model.evaluate(self.srcv, True)
-    print 'source:', format_z3val(src_v)
+    interp = smt(self.src)
+    if z3.is_false(self.model.evaluate(mk_and(interp.nonpoison))):
+      print 'source: poison'
+    else:
+      src_v = self.model.evaluate(self.srcv, True)
+      print 'source:', format_z3val(src_v)
 
     if self.cause == UB:
       print 'target: undefined'

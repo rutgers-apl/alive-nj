@@ -346,6 +346,14 @@ class SelectAst(InstAst):
 
     return L.SelectInst(sel, tval, fval, tty, fty, name)
 
+class FreezeAst(InstAst):
+  def inst(self, name, ids, phase):
+    toks = self.toks
+    ty = self.toks.ty.eval(ids, phase)
+    x  = self.toks.x.value(ty, ids, phase)
+
+    return L.FreezeInst(x, ty, name)
+
 # class AllocaExpr(InstAst):
 #   def getOp(self, name, ids, phase):
 # #     print 'AllocaExpr.getOp', self.toks.dump()
@@ -523,7 +531,10 @@ select.setParseAction(SelectAst)
 # load = Suppress('load') + opt_ty('ty') + operand('x') + (comma + Suppress('align') + posnum('align')|FollowedBy(LineEnd()))
 # load.setParseAction(LoadExpr)
 #
-op = binOp | convOp | icmp | fcmp | select | copyOp # | alloca | gep | load | copyOp
+freeze = Literal('freeze') - opt_ty('ty') + operand('x')
+freeze.setParseAction(FreezeAst)
+
+op = binOp | convOp | icmp | fcmp | select | copyOp | freeze
 op.setName('operator')
 
 
