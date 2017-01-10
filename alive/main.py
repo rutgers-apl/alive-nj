@@ -189,14 +189,24 @@ def main():
   if config.bench_dir:
     if not os.path.isdir(config.bench_dir):
       print 'ERROR: Benchmark directory', config.bench_dir, 'does not exist'
-      exit(-1)
+      exit(1)
 
   if args.translator not in smtinterp.SMTTranslator.registry:
     print 'ERROR: Unknown translator:', args.translator
-    exit(-1)
+    exit(1)
 
   if args.rounding_mode:
     z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 
-  verify_opts(read_opt_files(args.file), args.quiet, args.persist,
-    args.translator)
+  try:
+    verify_opts(read_opt_files(args.file), args.quiet, args.persist,
+      args.translator)
+  except KeyboardInterrupt:
+    sys.stderr.write('\n[Keyboard interrupt]\n')
+    exit(130)
+  except Exception as e:
+    logging.exception('Uncaught exception: %s', e)
+    sys.stderr.write('\nERROR: {}\n'.format(e))
+    exit(1)
+  finally:
+    logging.shutdown()

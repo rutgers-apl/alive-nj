@@ -62,7 +62,7 @@ logs = {
 
   'root': {
     'level': 'WARNING',
-    'handlers': ['default', 'warnings']
+    'handlers': ['default']
   },
 
   'loggers': {

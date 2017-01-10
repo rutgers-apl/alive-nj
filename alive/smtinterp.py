@@ -196,10 +196,13 @@ class BaseSMTTranslator():
     return z3.Const(prefix + str(self.fresh), _ty_sort(ty))
 
   def _conditional_value(self, conds, v, name=''):
-    raise NotImplementedError
+    raise NotImplementedError('{} does not support floating-point'.format(
+      type(self).__name__.lower()))
 
   def _conditional_conv_value(self, conds, v, name=''):
-    raise NotImplementedError
+    raise NotImplementedError(
+      '{} does not support floating-point conversion'.format(
+      type(self).__name__.lower()))
 
   def _binary_operator(self, term, op, defined, poisons):
     x = self.eval(term.x)
@@ -437,7 +440,7 @@ def _eval_bitcast(src, tgt, v):
 
   Assumes src and tgt have the same bit width.
   """
-  raise NotImplementedError
+  raise NotImplementedError('Unexpected bitcast: {} -> {}'.format(src, tgt))
 
 @_eval_bitcast.register(IntType, IntType)
 @_eval_bitcast.register(IntType, PtrType)
