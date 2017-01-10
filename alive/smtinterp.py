@@ -1088,6 +1088,122 @@ def _(term, smt):
   warnings.warn('Use of undef with poison-only semantics')
   return eval.dispatch(UndefValue, BaseBranchSelect)(term, smt)
 
+
+class EscalatePoison(BaseSMTTranslator):
+  pass
+
+@eval.register(SDivInst, EscalatePoison)
+def _(term, smt):
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_nonpoison(*nx)
+  #smt.add_nonpoison(*ny)
+
+  smt.add_defs(y != 0, *ny)
+  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison((x/y)*y == x)
+
+  return x/y
+
+@eval.register(UDivInst, EscalatePoison)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(y != 0, *ny)
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison(z3.UDiv(x,y)*y == x)
+
+  return z3.UDiv(x,y)
+
+@eval.register(SRemInst, EscalatePoison)
+def _(term, smt):
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_nonpoison(*nx)
+  #smt.add_nonpoison(*ny)
+
+  smt.add_defs(y != 0, *ny)
+  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
+
+  return z3.SRem(x,y)
+
+@eval.register(URemInst, EscalatePoison)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(y != 0, *ny)
+
+  return z3.URem(x,y)
+
+@eval.register(ShlInst, EscalatePoison)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(z3.ULT(y, y.size()), *ny)
+
+  if 'nsw' in term.flags:
+    smt.add_nonpoison((x << y) >> y == x)
+
+  if 'nuw' in term.flags:
+    smt.add_nonpoison(z3.LShR(x << y, y) == x)
+
+  return x << y
+
+@eval.register(AShrInst, EscalatePoison)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(z3.ULT(y, y.size()), *ny)
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison((x >> y) << y == x)
+
+  return x >> y
+
+@eval.register(LShrInst, EscalatePoison)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(z3.ULT(y, y.size()), *ny)
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison(z3.LShR(x, y) << y == x)
+
+  return z3.LShR(x, y)
+
+class Modern(PoisonOnly, EscalatePoison):
+  """
+  """
+  pass
+
+
+
 class NewShlSemantics(BaseSMTTranslator):
   pass
 
