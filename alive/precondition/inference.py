@@ -2,7 +2,8 @@ from . import enumerator
 from .. import language as L
 from .. import typing
 from .. import smtinterp
-from ..analysis import safety
+from .. import config
+from ..transform import Formatted
 from ..util.pretty import pformat
 from ..z3util import mk_and, mk_or, mk_not, mk_forall
 import collections
@@ -31,9 +32,9 @@ def test_feature(pred, test_case, cache):
   try:
     pred_smt = cache[test_case.type_vector]
   except KeyError:
-    smt = safety.Translator(test_case.type_vector)
+    smt = Translator(test_case.type_vector)
     pre = smt(pred)
-    assert not (pre.defined or pre.nonpoison or pre.qvars)
+    assert not (pre.defined or pre.nonpoison or pre.aux or pre.qvars)
     pred_smt = (pre.safe, pre.value)
     cache[test_case.type_vector] = pred_smt
 
@@ -694,12 +695,10 @@ def infer_preconditions_by_examples(config, positive, negative,
         # ----
         # FIXME: move scoring somewhere appropriate
         if log.isEnabledFor(logging.DEBUG):
-          from .. import transform
           score, pscore = score_features(feature_vectors)
-          fmt = transform.Formatter()
           log.debug('Feature scores:\n' + '\n'.join(
             '  {:5,} {:5,} : {}'.format(score[f], pscore[f],
-                                  transform.format(features[f], fmt))
+                                        Formatted(features[f]))
               for f in xrange(len(features))))
         # ----
 
@@ -820,10 +819,13 @@ def get_models(expr, vars):
 def interpret_opt(smt, opt, strengthen=False):
   """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
   """
+  # FIXME: division into tgt_safe, premises, and consequent is shaky.
+  #        rethink, esp. with regard to aux conditions
+  #        maybe better to eliminate entirely
 
   if strengthen and opt.pre:
     pre = smt(opt.pre)
-    safe = pre.safe + pre.defined + pre.nonpoison + [pre.value]
+    safe = pre.safe + pre.aux + pre.defined + pre.nonpoison + [pre.value]
   else:
     safe = []
 
@@ -832,11 +834,15 @@ def interpret_opt(smt, opt, strengthen=False):
     raise Exception('quantified variables in opt {!r}'.format(opt.name))
 
   assert not src.safe
+  assert not src.aux
 
   sd = src.defined + src.nonpoison
 
   tgt = smt(opt.tgt)
   safe.extend(tgt.safe)
+  if tgt.aux:
+    raise Exception('Unexpected auxiliary conditions in target for'
+                    'opt {!r}'.format(opt.name))
 
   td = tgt.defined + tgt.nonpoison + [src.value == tgt.value]
 
@@ -887,7 +893,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
   for type_vector in type_vectors:
     log.debug('Making cases for %s', type_vector)
 
-    smt = safety.Translator(type_vector)
+    smt = Translator(type_vector)
 
     symbol_smts = [smt.eval(t) for t in symbols]
 
@@ -982,7 +988,7 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
 
   for type_vector in opt.type_models():
     reporter.test_precondition()
-    smt = safety.Translator(type_vector)
+    smt = Translator(type_vector)
 
     tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
 
@@ -993,12 +999,14 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
     for t in assumptions:
       t_smt = smt(t)
       meta_premise.extend(t_smt.safe)
+      meta_premise.extend(t_smt.aux)
       meta_premise.extend(t_smt.defined)
       meta_premise.extend(t_smt.nonpoison)
       meta_premise.append(t_smt.value)
 
     pre_smt = smt(pre)
     meta_premise.extend(pre_smt.safe)
+    meta_premise.extend(pre_smt.aux)
     meta_premise.extend(pre_smt.defined)
     meta_premise.extend(pre_smt.nonpoison)
     meta_premise.append(pre_smt.value)
@@ -1035,7 +1043,7 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
   for type_vector in opt.type_models():
     log.debug('checking types %s', type_vector)
     reporter.test_precondition() # make more specific?
-    smt = safety.Translator(type_vector)
+    smt = Translator(type_vector)
 
     tgt_safe, premises, consequent = interpret_opt(smt, opt)
 
@@ -1043,11 +1051,13 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     for t in assumptions:
       t_smt = smt(t)
       meta_premise.extend(t_smt.safe)
+      meta_premise.extend(t_smt.aux)
       meta_premise.append(t_smt.value)
       assert not t_smt.defined or t_smt.value
       # TODO: add these to premises?
 
     pre_smt = smt(pre)
+    meta_premise.extend(pre_smt.aux)
     meta_premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
     assert not pre_smt.defined or pre_smt.value
     # TODO: add these to premises?
@@ -1168,7 +1178,9 @@ def infer_precondition(opt,
 
   for pre, coverage, ifeatures in pres:
     if log.isEnabledFor(logging.INFO):
-      log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
+      #log.info('Inferred precondition\n' + pformat(pre, prefix='  '))
+      log.info('Inferred precondition\n  %s',
+        Formatted(pre, indent=2, start_at=2))
 
     counter_examples = check_refinement(opt, assumptions, pre, symbols, solver_bad)
 
@@ -1308,6 +1320,17 @@ cs_strategies = {
   'minneg': find_least_negative_conflict_set,
 }
 
+Translator = smtinterp.BaseSMTTranslator.registry[config.translator]
+
+def set_translator(translator):
+  global Translator
+
+  if isinstance(translator, str):
+    translator = smtinterp.BaseSMTTranslator.registry[translator]
+
+  Translator = translator
+
+
 def main(
     strengthen = False,
     weakest = False,
@@ -1366,72 +1389,84 @@ def main(
 
   args = parser.parse_args()
 
-  for opt,features,assumes in read_opt_files(args.file, extended_results=True):
-    print '; -----'
+  try:
 
-    if not args.assumptions:
-      assumes = []
-    if args.assume_pre:
-      assumes.append(opt.pre)
+    for opt,features,assumes in read_opt_files(args.file, extended_results=True):
+      print '; -----'
 
-    if not args.features:
-      features = []
-    if args.pre_features and opt.pre:
-      features.extend(t for t in L.subterms(opt.pre)
-                        if isinstance(t, (L.Comparison, L.FunPred)))
+      if not args.assumptions:
+        assumes = []
+      if args.assume_pre:
+        assumes.append(opt.pre)
 
-    if args.echo:
-      hds = [('Assume:', t) for t in assumes]
-      if opt.pre:
-        hds.append(('Pre:', opt.pre))
-      hds.extend(('Feature:', t) for t in features)
-      print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
+      if not args.features:
+        features = []
+      if args.pre_features and opt.pre:
+        features.extend(t for t in L.subterms(opt.pre)
+                          if isinstance(t, (L.Comparison, L.FunPred)))
 
-    set_reporter(Reporter())
+      if args.echo:
+        hds = [('Assume:', t) for t in assumes]
+        if opt.pre:
+          hds.append(('Pre:', opt.pre))
+        hds.extend(('Feature:', t) for t in features)
+        print Formatted(transform.format_parts(opt.name, hds, opt.src, opt.tgt))
 
-    pres = infer_precondition(opt,
-      strengthen = args.strengthen,
-      weakest = args.weakest,
-      features = features,
-      assumptions = assumes,
-      random_cases = random_examples,
-      solver_good = solver_positives,
-      solver_bad = solver_negatives,
-      incompletes = args.incompletes,
-      conflict_set = cs_strategies[args.strategy])
+      set_reporter(Reporter())
 
-    if args.first_only:
-      pres = itertools.islice(pres, 1)
+      pres = infer_precondition(opt,
+        strengthen = args.strengthen,
+        weakest = args.weakest,
+        features = features,
+        assumptions = assumes,
+        random_cases = random_examples,
+        solver_good = solver_positives,
+        solver_bad = solver_negatives,
+        incompletes = args.incompletes,
+        conflict_set = cs_strategies[args.strategy])
 
-    try:
-      for pre, coverage, ifeatures in pres:
-        reporter.clear_message()
+      if args.first_only:
+        pres = itertools.islice(pres, 1)
 
-        hds = [('Feature:', t) for t in ifeatures] + \
-          [('Assume:', t) for t in assumes] + \
-          [('Pre:', pre)] if pre else []
+      try:
+        for pre, coverage, ifeatures in pres:
+          reporter.clear_message()
 
-        print
-        print transform.format_parts(opt.name, hds, opt.src, opt.tgt)
-        print '''; positive examples {1:,} of {0.num_good_cases:,}
+          hds = [('Feature:', t) for t in ifeatures] + \
+            [('Assume:', t) for t in assumes] + \
+            [('Pre:', pre)] if pre else []
+
+          print
+          print Formatted(transform.format_parts(opt.name,hds,opt.src,opt.tgt))
+          print '''; positive examples {1:,} of {0.num_good_cases:,}
 ; negative examples {0.num_bad_cases:,}
 ; accepted features {0.features:,}
 ; total features tested {0.generated_features:,}'''.format(reporter,coverage)
-        sys.stdout.flush()
+          sys.stdout.flush()
 
-      if args.weakest:
+        if args.weakest:
+          reporter.clear_message()
+          print '; precondition is complete'
+
+      except NoPositives:
         reporter.clear_message()
-        print '; precondition is complete'
+        print '; Failure: No positive instances'
+      except MissingFalsePositives:
+        reporter.clear_message()
+        print '; Failure: Validity not proven'
+      except MissingFalseNegatives:
+        reporter.clear_message()
+        print '; Failure: Completeness not proven'
 
-    except NoPositives:
-      reporter.clear_message()
-      print '; Failure: No positive instances'
-    except MissingFalsePositives:
-      reporter.clear_message()
-      print '; Failure: Validity not proven'
-    except MissingFalseNegatives:
-      reporter.clear_message()
-      print '; Failure: Completeness not proven'
+  except KeyboardInterrupt:
+    sys.stderr.write('\n[Keyboard interrupt]\n')
+    exit(130)
+  except Exception as e:
+    logging.exception('Uncaught exception: %s', e)
+    sys.stderr.write('\nERROR: {}\n'.format(e))
+    exit(1)
+  finally:
+    logging.shutdown()
 
 if __name__ == '__main__':
   main()
