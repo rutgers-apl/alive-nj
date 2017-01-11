@@ -10,7 +10,7 @@ persist = False
 quiet = False
 
 # allow poison->undefined behavior
-poison_undef = True
+poison_undef = False
 
 # benchmark directory (if None, no benchmarks will be printed)
 bench_dir = None
