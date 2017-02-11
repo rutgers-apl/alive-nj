@@ -950,7 +950,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
         tuple(itertools.imap(lambda s,v,ty: (s, z3.BitVecVal(v, ty.width)),
           symbol_smts, tc_vals, symbol_types)))
 
-      if filter and not satisfiable(filter, tc.values):
+      if filter is not None and not satisfiable(filter, tc.values):
         continue
 
       if satisfiable(z3.Not(e), tc.values):
