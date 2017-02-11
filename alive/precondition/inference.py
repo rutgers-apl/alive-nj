@@ -1053,13 +1053,13 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
       meta_premise.extend(t_smt.safe)
       meta_premise.extend(t_smt.aux)
       meta_premise.append(t_smt.value)
-      assert not t_smt.defined or t_smt.value
+      assert not t_smt.defined and not t_smt.nonpoison
       # TODO: add these to premises?
 
     pre_smt = smt(pre)
     meta_premise.extend(pre_smt.aux)
     meta_premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
-    assert not pre_smt.defined or pre_smt.value
+    assert not pre_smt.defined and not pre_smt.nonpoison
     # TODO: add these to premises?
 
     # don't bother with trivial instances
