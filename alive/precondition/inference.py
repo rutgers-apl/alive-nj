@@ -17,12 +17,14 @@ logger = logging.getLogger(__name__)
 CONFLICT_SET_CUTOFF = 16
 SAMPLES = 5
 
-def mk_implies(premises, consequent):
+def mk_implies(premises, consequents):
+  if not consequents:
+    return []
+
   if premises:
-    return z3.Implies(mk_and(premises), consequent)
+    return [z3.Implies(mk_and(premises), mk_and(consequents))]
 
-  return consequent
-
+  return consequents
 
 TestCase = collections.namedtuple('TestCase', ['type_vector', 'values'])
 
@@ -816,37 +818,65 @@ def get_models(expr, vars):
   if res == z3.unknown:
     raise Exception('Solver returned unknown: ' + s.reason_unknown())
 
-def interpret_opt(smt, opt, strengthen=False):
-  """Translate opt to form mk_and(S + P) => Q and return S, P, Q.
+def interpret_opt(translator, opt, assumptions=(), strengthen=False):
+  """Translate body of opt using SMT translator.
+
+  Returns (premise, body, filter), where premise is a statment which must
+  always be true, body is true when the optimization is valid, and filter
+  is true when opt.src is well-defined and nonpoison.
+
+  opt is valid if and only if premise => body.
+
+  If strengthen is True, then body also requires opt.pre to be true.
   """
-  # FIXME: division into tgt_safe, premises, and consequent is shaky.
-  #        rethink, esp. with regard to aux conditions
-  #        maybe better to eliminate entirely
+  # This overlaps with alive.refinement, but this combines the refinement check
+  # into a single SMT query *and* returns the query in components, allowing for
+  # the insertion of quantifiers and negation where needed.
+  #
+  # Care must be taken to keep this and alive.refinement compatible.
 
-  if strengthen and opt.pre:
-    pre = smt(opt.pre)
-    safe = pre.safe + pre.aux + pre.defined + pre.nonpoison + [pre.value]
-  else:
-    safe = []
+  # initial premise: assumptions are safe and satisfied
+  premise = []
+  for a in assumptions:
+    smt = translator(a)
 
-  src = smt(opt.src)
+    # assumptions should never be ill-defined
+    assert not smt.defined and not smt.nonpoison and not smt.qvars
+
+    premise += smt.aux
+    premise += smt.safe
+    premise.append(smt.value)
+
+  src = translator(opt.src)
+
+  assert not src.aux and not src.safe
   if src.qvars:
-    raise Exception('quantified variables in opt {!r}'.format(opt.name))
+    raise Exception("Quantified variables in opt {!r}".format(opt.name))
 
-  assert not src.safe
-  assert not src.aux
+  tgt = translator(opt.tgt)
 
-  sd = src.defined + src.nonpoison
+  premise += tgt.aux
+  filter = src.defined + src.nonpoison
 
-  tgt = smt(opt.tgt)
-  safe.extend(tgt.safe)
-  if tgt.aux:
-    raise Exception('Unexpected auxiliary conditions in target for'
-                    'opt {!r}'.format(opt.name))
+  body = []
+  if config.poison_undef:
+    body += tgt.safe
+    body += mk_implies(filter,
+      tgt.defined + tgt.nonpoison + [src.value == tgt.value])
+  else:
+    body += tgt.safe
+    body += mk_implies(src.defined, tgt.defined)
+    body += mk_implies(filter, tgt.nonpoison + [src.value == tgt.value])
 
-  td = tgt.defined + tgt.nonpoison + [src.value == tgt.value]
+  if strengthen:
+    pre = translator(opt.pre)
+    assert not pre.defined and not pre.nonpoison and not pre.qvars
+    premise += pre.aux
+    premise += pre.safe
+    body.append(pre.value)
 
-  return safe, sd, mk_and(td)
+  return premise, body, filter
+
 
 def random_cases(types):
   """Generate infinitely many possible values for the given list of types.
@@ -897,12 +927,9 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     symbol_smts = [smt.eval(t) for t in symbols]
 
-    safe, premises, consequent = interpret_opt(smt, opt, strengthen)
-    assumptions_smt = [smt.eval(t) for t in assumptions]
+    premise, body, filter = interpret_opt(smt, opt, assumptions, strengthen)
 
-    e = mk_and(safe + [mk_implies(premises, consequent)])
-
-    query = mk_and(assumptions_smt + [z3.Not(e)])
+    query = mk_and(premise + [mk_not(body)])
     log.debug('Negative Query:\n%s', query)
 
     solver_bads = [tc
@@ -922,7 +949,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
 
-      query = mk_and(assumptions_smt + premises + [mk_forall(input_smts, [e])])
+      query = mk_and(premise + filter + [mk_forall(input_smts, body)])
       log.debug('Positive Query\n%s', query)
       solver_goods = [tc for
         tc in itertools.islice(get_models(query, symbol_smts), num_good)
@@ -934,8 +961,9 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
       skip.update(tuple(v.as_long() for (_,v) in tc) for tc in solver_goods)
       reporter.test_cases(goods, bads)
 
-    filter = mk_and(assumptions_smt + premises) \
-      if assumptions_smt or premises else None
+    filter = mk_and(premise + filter) if premise or filter else None
+    query = mk_and(premise + [mk_not(body)])
+    # premise has to be included in both because it might contain tgt.aux
 
     symbol_types = [type_vector[typing.context[s]] for s in symbols]
     corner_tcs = get_corner_cases(symbol_types)
@@ -953,7 +981,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
       if filter is not None and not satisfiable(filter, tc.values):
         continue
 
-      if satisfiable(z3.Not(e), tc.values):
+      if satisfiable(query, tc.values):
         bads.append(tc)
       else:
         goods.append(tc)
@@ -990,36 +1018,21 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
     reporter.test_precondition()
     smt = Translator(type_vector)
 
-    tgt_safe, premises, consequent = interpret_opt(smt, opt)  # cache this?
-
-    log.debug('\ntgt_safe %s\npremises %s\nconsequent %s',
-      tgt_safe, premises, consequent)
-
-    meta_premise = []
-    for t in assumptions:
-      t_smt = smt(t)
-      meta_premise.extend(t_smt.safe)
-      meta_premise.extend(t_smt.aux)
-      meta_premise.extend(t_smt.defined)
-      meta_premise.extend(t_smt.nonpoison)
-      meta_premise.append(t_smt.value)
+    premise, body, _ = interpret_opt(smt, opt, assumptions)
 
     pre_smt = smt(pre)
-    meta_premise.extend(pre_smt.safe)
-    meta_premise.extend(pre_smt.aux)
-    meta_premise.extend(pre_smt.defined)
-    meta_premise.extend(pre_smt.nonpoison)
-    meta_premise.append(pre_smt.value)
+    assert not pre_smt.defined and not pre_smt.nonpoison and not pre_smt.qvars
 
-    log.debug('meta_premise\n%s', meta_premise)
+    premise += pre_smt.safe
+    premise += pre_smt.aux
+    premise.append(pre_smt.value)
 
-    e = mk_implies(meta_premise,
-                   mk_and(tgt_safe + [mk_implies(premises, consequent)]))
+    e = mk_and(premise + [mk_not(body)])
     log.debug('Validity check\n%s', e)
 
     symbol_smts = [smt.eval(t) for t in symbols]
     counter_examples = list(
-      itertools.islice(get_models(z3.Not(e), symbol_smts), solver_bad))
+      itertools.islice(get_models(e, symbol_smts), solver_bad))
 
     if counter_examples:
       counter_examples = [TestCase(type_vector, tc) for tc in counter_examples
@@ -1045,32 +1058,17 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     reporter.test_precondition() # make more specific?
     smt = Translator(type_vector)
 
-    tgt_safe, premises, consequent = interpret_opt(smt, opt)
-
-    meta_premise = []
-    for t in assumptions:
-      t_smt = smt(t)
-      meta_premise.extend(t_smt.safe)
-      meta_premise.extend(t_smt.aux)
-      meta_premise.append(t_smt.value)
-      assert not t_smt.defined and not t_smt.nonpoison
-      # TODO: add these to premises?
-
-    pre_smt = smt(pre)
-    meta_premise.extend(pre_smt.aux)
-    meta_premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
-    assert not pre_smt.defined and not pre_smt.nonpoison
-    # TODO: add these to premises?
-
-    # don't bother with trivial instances
-    meta_premise.extend(premises)
-
-    log.debug('meta_premise\n%s', meta_premise)
-
+    premise, body, filter = interpret_opt(smt, opt, assumptions)
     input_smts = [smt.eval(t) for t in inputs]
 
-    e = mk_and(meta_premise +
-         [mk_forall(input_smts, tgt_safe + [mk_implies(premises, consequent)])])
+    pre_smt = smt(pre)
+    assert not pre_smt.defined and not pre_smt.nonpoison and not pre_smt.qvars
+
+    premise += pre_smt.aux
+    premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
+    # require cases where the precondition is unsafe or unsatisfied
+
+    e = mk_and(premise + [mk_forall(input_smts, body)])
 
     log.debug('Validity check\n%s', e)
     symbol_smts = [smt.eval(t) for t in symbols]
