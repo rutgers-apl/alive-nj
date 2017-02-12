@@ -479,7 +479,7 @@ def _(term, fmt, prec):
 
   body = gather(term)
 
-  if prec >= op_prec or 0 < prec < 8:
+  if prec >= op_prec or 3 < prec < 8:
     body = pretty.seq('(', body, ')')
 
   return pretty.group(body).nest(2)
