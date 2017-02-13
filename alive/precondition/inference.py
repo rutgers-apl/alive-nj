@@ -214,17 +214,22 @@ def score_features(vectors):
 
   return score, pscore
 
+
+Literal = collections.namedtuple('Clause', ['feature', 'condition'])
+# Literal(ACCEPT, 1) -> feature_1
+# Literal(REJECT, 1) -> not feature_1
+
+# FIXME: ignores unsafe behavior when accepting vectors
 def clause_accepts(clause, vector):
-  return any(vector[l] == REJECT if l < 0 else vector[l] == ACCEPT
-              for l in clause)
+  return any(vector[l.feature] == l.condition for l in clause)
 
 def consistent_clause(clause, vectors):
   return all(clause_accepts(clause, v) for v in vectors)
 
 def all_clauses(lits, size):
   for c in itertools.combinations(xrange(lits), size):
-    for p in itertools.product([True,False], repeat=size):
-      yield tuple(i if s else i-lits for (i,s) in itertools.izip(c,p))
+    for p in itertools.product([ACCEPT,REJECT], repeat=size):
+      yield tuple(itertools.imap(Literal, c, p))
 
 def learn_boolean(feature_count, goods, bads):
   log = logger.getChild('learn_bool')
@@ -582,42 +587,6 @@ def mk_OrPred(clauses):
 
 negate_pred = enumerator.negate_pred
 
-def make_precondition(features, feature_vectors, incomplete):
-  """Return an expression which is true for the positive feature vectors.
-
-  incomplete - require success only for the most positive vector
-  """
-  log = logger.getChild('pie')
-
-  if incomplete:
-    pos_vecs = filter(lambda v: not v[2], feature_vectors)
-    best_vec = max(pos_vecs, key=lambda v: len(v[1]))
-    pos_vecs = [best_vec[0]]
-  else:
-    pos_vecs = [v[0] for v in feature_vectors if not v[2]]
-
-  neg_vecs = [v[0] for v in feature_vectors if v[2]]
-
-#   log.debug('make_precondition\n+ %s\n- %s', pos_vecs, neg_vecs)
-
-  clauses = learn_boolean(len(features), pos_vecs, neg_vecs)
-
-  log.debug('clauses: %s', clauses)
-
-  # only useful when doing an incomplete precondition, but it's cheap
-  coverage = sum(len(v[1]) for v in feature_vectors if not v[2] and
-    all(clause_accepts(c, v[0]) for c in clauses))
-
-  log.debug('coverage: %s', coverage)
-
-  pre = mk_AndPred(
-          mk_OrPred(
-            negate_pred(features[l]) if l < 0 else features[l] for l in c)
-          for c in clauses)
-
-  return pre, coverage, features
-
-
 
 class MoreExamples(Exception):
   """Used to signal that the lists of examples have been updated.
@@ -665,6 +634,19 @@ def preconditions_satisfying_examples(config, positive, negative,
       # not actually necessary to do anything
       yield None
 
+def make_precondition(clauses, features):
+  def lit(l):
+    if l.condition == REJECT:
+      return negate_pred(features[l.feature])
+
+    return features[l.feature]
+
+  return mk_AndPred(mk_OrPred(lit(l) for l in c) for c in clauses)
+
+def calculate_coverage(clauses, feature_vectors):
+  return sum(len(v[1]) for v in feature_vectors if not v[2] and
+    all(clause_accepts(c, v[0]) for c in clauses))
+
 def infer_preconditions_by_examples(config, positive, negative,
     features = (),
     incompletes = False,
@@ -686,13 +668,14 @@ def infer_preconditions_by_examples(config, positive, negative,
   features, feature_vectors = create_feature_vectors(features,positive,negative)
   # FIXME: no longer reports these as accepted features
 
-  incomplete_coverage = 0
+  # ensure we don't generate the same precondition twice
+  generated_preconditions = set()
+
   while True:
     try:
 
-      # if we are yielding intermediate results, then see if any positive
-      # instances have moved out of a conflict set, and then return a precondition
-      # which covers at least the largest positive vector
+      # if we are yielding intermediate results, attempt to learn a conjunction
+      # of features maximizing coverage, and see if it's new
       if incompletes:
         # ----
         # FIXME: move scoring somewhere appropriate
@@ -706,47 +689,43 @@ def infer_preconditions_by_examples(config, positive, negative,
 
         available_positives = sum(len(v[1]) for v in feature_vectors if not v[2])
         log.debug('available positives: %s', available_positives)
-        if available_positives > incomplete_coverage:
-          incomplete_coverage = available_positives
-          yield make_precondition(features, feature_vectors, incompletes)
 
-          # -----
-          # FIXME: use only one method for finding incomplete preconditions
-          # FIXME: none of these check for None results
-          wpos = [(v[0], len(v[1])) for v in feature_vectors if not v[2]]
-          neg = [v[0] for v in feature_vectors if v[2]]
-          cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0)
-          log.debug('clauses: %s', cl)
-          p = mk_AndPred(
-                mk_OrPred(
-                  negate_pred(features[l]) if l < 0 else features[l] for l in c)
-                for c in cl)
+        wpos = [(v[0], len(v[1])) for v in feature_vectors if not v[2]]
+        neg = [v[0] for v in feature_vectors if v[2]]
 
-          cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
-            all(clause_accepts(c, v[0]) for c in cl))
+        cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0) \
+          if wpos else None
+        log.debug('incomplete predicate clauses: %s', cl)
+
+        # the key is sorted, because the order of the clauses doesn't matter
+        key = None if cl is None else tuple(sorted(cl))
+        if key is not None and key not in generated_preconditions:
+          generated_preconditions.add(key)
+
+          p = make_precondition(cl, features)
+          cv = calculate_coverage(cl, feature_vectors)
 
           log.debug('coverage: %s', cv)
 
           yield p, cv, features
-#
-#           # do the same with k <= 2
-#           cl = learn_incomplete_boolean_tryhard(len(features), wpos, neg, 0, 2)
-#           log.debug('clauses: %s', cl)
-#           cv = sum(len(v[1]) for v in feature_vectors if not v[2] and
-#             all(clause_accepts(c, v[0]) for c in cl))
-#           log.debug('coverage: %s', cv)
-#
-#           p = mk_AndPred(
-#                 mk_OrPred(
-#                   negate_pred(features[l]) if l < 0 else features[l] for l in c)
-#                 for c in cl)
-#
-#           yield p, cv, features
-          # ----
 
       conflict = conflict_set(feature_vectors)
       if conflict is None:
-        yield make_precondition(features, feature_vectors, False)
+        pos_vecs = [v[0] for v in feature_vectors if not v[2]]
+        neg_vecs = [v[0] for v in feature_vectors if v[2]]
+
+        clauses = learn_boolean(len(features), pos_vecs, neg_vecs)
+        log.debug('clauses: %s', clauses)
+
+        key = tuple(sorted(clauses))
+        if key not in generated_preconditions:
+          generated_preconditions.add(key)
+          p = make_precondition(clauses, features)
+          cv = calculate_coverage(clauses, feature_vectors)
+          assert cv == len(positive)
+
+          yield p, cv, features
+
         return
 
       # prepare to learn a new feature
