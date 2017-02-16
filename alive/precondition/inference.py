@@ -221,7 +221,15 @@ Literal = collections.namedtuple('Clause', ['feature', 'condition'])
 
 # FIXME: ignores unsafe behavior when accepting vectors
 def clause_accepts(clause, vector):
-  return any(vector[l.feature] == l.condition for l in clause)
+#   return any(vector[l.feature] == l.condition for l in clause)
+  for l in clause:
+    if vector[l.feature] == UNSAFE:
+      return False
+
+    if vector[l.feature] == l.condition:
+      return True
+
+  return False
 
 def consistent_clause(clause, vectors):
   return all(clause_accepts(clause, v) for v in vectors)
