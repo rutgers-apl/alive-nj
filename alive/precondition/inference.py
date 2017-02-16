@@ -928,7 +928,8 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     if num_good > 0:
       input_smts = [smt.eval(t) for t in inputs]
 
-      query = mk_and(premise + filter + [mk_forall(input_smts, body)])
+      # premise inside quantifier because it may contain tgt.aux
+      query = mk_and(filter + [mk_forall(input_smts, premise + body)])
       log.debug('Positive Query\n%s', query)
       solver_goods = [tc for
         tc in itertools.islice(get_models(query, symbol_smts), num_good)
@@ -1047,7 +1048,8 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     premise.append(mk_not(pre_smt.safe + [pre_smt.value]))
     # require cases where the precondition is unsafe or unsatisfied
 
-    e = mk_and(premise + [mk_forall(input_smts, body)])
+    # premise inside quantifier because it may include tgt.aux
+    e = mk_and(filter + [mk_forall(input_smts, premise + body)])
 
     log.debug('Validity check\n%s', e)
     symbol_smts = [smt.eval(t) for t in symbols]
