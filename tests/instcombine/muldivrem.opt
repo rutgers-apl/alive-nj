@@ -292,7 +292,7 @@ Name: SimplifyDivRemOfSelect
 ; FIXME: cannot do the remaining part of SimplifyDivRemOfSelect
 
 
-Name: 735
+Name: 735-1
 ; FIXME: slow
 Pre: WillNotOverflowSignedMul(C1, C2)
 %Op0 = sdiv i7 %X, C1
@@ -301,7 +301,7 @@ Pre: WillNotOverflowSignedMul(C1, C2)
 %r = sdiv %X, C1*C2
 
 
-Name: 735
+Name: 735-2
 ; FIXME: slow
 Pre: WillNotOverflowUnsignedMul(C1, C2)
 %Op0 = udiv i7 %X, C1
@@ -310,26 +310,26 @@ Pre: WillNotOverflowUnsignedMul(C1, C2)
 %r = udiv %X, C1*C2
 
 
-Name: 748
+Name: 748-1
 ; FIXME: merge with the following
 Assume: C1 != 0
-Pre: C2 % C1 == 0
+Pre: C2 % C1 == 0 && C1 != -C2
 %m = mul nsw i7 %X, C1
 %r = sdiv %m, C2
   =>
 %r = sdiv %X, C2/C1
 
 
-Name: 748
+Name: 748-2
 Assume: C1 != 0
-Pre: C2 % C1 == 0
+Pre: C2 % C1 == 0 && C1 != -C2
 %m = mul nsw i7 %X, C1
 %r = sdiv exact %m, C2
   =>
 %r = sdiv exact %X, C2/C1
 
 
-Name: 748
+Name: 748-3
 ; FIXME: merge with the following
 Assume: C1 != 0
 Pre: C2 %u C1 == 0
@@ -339,7 +339,7 @@ Pre: C2 %u C1 == 0
 %r = udiv %X, C2 /u C1
 
 
-Name: 748
+Name: 748-4
 Assume: C1 != 0
 Pre: C2 %u C1 == 0
 %m = mul nuw i7 %X, C1
@@ -348,7 +348,7 @@ Pre: C2 %u C1 == 0
 %r = udiv exact %X, C2 /u C1
 
 
-Name: 756
+Name: 756-1
 ; FIXME: merge the following 3
 Assume: C2 != 0
 Pre: C1 % C2 == 0
@@ -358,7 +358,7 @@ Pre: C1 % C2 == 0
 %r = mul nsw %X, C1/C2
 
 
-Name: 756
+Name: 756-2
 Assume: C2 != 0
 Pre: C1 %u C2 == 0
 %m = mul nuw i7 %X, C1
@@ -367,7 +367,7 @@ Pre: C1 %u C2 == 0
 %r = mul nuw %X, C1/u C2
 
 
-Name: 756
+Name: 756-3
 Assume: C2 != 0
 Pre: C1 %u C2 == 0
 %m = mul nuw nsw i7 %X, C1
@@ -376,30 +376,31 @@ Pre: C1 %u C2 == 0
 %r = mul nuw nsw %X, C1/u C2
 
 
-Name: 764
+Name: 764-1
 ; FIXME: slow
 ; FIXME: merge the following 4
-Assume: C1 u< width(C1)
-Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
+Assume: 0 u< C1 u< width(C1)
+Assume: C2 != 0
+Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1 && C2 / (1 << C1) != -1
 %s = shl nsw i9 %X, C1
 %r = sdiv %s, C2
   =>
 %r = sdiv %X, C2/(1<<C1)
 
 
-Name: 764
+Name: 764-2
 ; FIXME: slow
-Assume: C1 u< width(C1)
-Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1
+Assume: 0 u< C1 u< width(C1)
+Assume: C2 != 0
+Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1 && C2 / (1 << C1) != -1
 %s = shl nsw i7 %X, C1
 %r = sdiv exact %s, C2
   =>
 %r = sdiv exact %X, C2/(1<<C1)
 
 
-Name: 764
+Name: 764-3
 ; FIXME: slow
-Assume: C1 u< width(C1)
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw i9 %X, C1
 %r = udiv %s, C2
@@ -407,9 +408,8 @@ Pre: C2 %u (1<<C1) == 0
 %r = udiv %X, C2/u (1<<C1)
 
 
-Name: 764
+Name: 764-4
 ; FIXME: slow
-Assume: C1 u< width(C1)
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw i7 %X, C1
 %r = udiv exact %s, C2
@@ -417,7 +417,7 @@ Pre: C2 %u (1<<C1) == 0
 %r = udiv exact %X, C2/u (1<<C1)
 
 
-Name: 772
+Name: 772-1
 ; FIXME: slow
 ; FIXME: merge the following 3
 Assume: C2 != 0
@@ -428,7 +428,7 @@ Pre: (1<<C1) % C2 == 0 && C1 != width(C1)-1
 %r = mul nsw %X, (1<<C1)/C2
 
 
-Name: 772
+Name: 772-2
 Assume: C2 != 0
 Pre: (1<<C1) %u C2 == 0
 %s = shl nuw i9 %X, C1
@@ -437,7 +437,7 @@ Pre: (1<<C1) %u C2 == 0
 %r = mul nuw %X, (1<<C1) /u C2
 
 
-Name: 772
+Name: 772-3
 Assume: C2 != 0
 Pre: (1<<C1) %u C2 == 0
 %s = shl nsw nuw i9 %X, C1
@@ -461,7 +461,7 @@ Name: 809
 %r = zext %c
 
 
-Name: 820
+Name: 820-1
 ; FIXME: merge with the following?
 ; FIXME: slow
 %Z = srem i9 %X, %Op1
@@ -471,7 +471,7 @@ Name: 820
 %r = sdiv %X, %Op1
 
 
-Name: 820
+Name: 820-2
 ; FIXME: slow
 %Z = urem i9 %X, %Op1
 %Op0 = sub %X, %Z
@@ -608,6 +608,7 @@ Pre: isSignBit(C)
 
 Name: 1049
 ; FIXME: slow
+Pre: C != 1
 %Op0 = sub nsw i11 0, %X
 %r = sdiv %Op0, C
   =>
