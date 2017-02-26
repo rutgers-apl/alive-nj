@@ -90,15 +90,26 @@ class TypeConstraints(object):
     self.widthlimit = maxwidth+1
     self.default_rep = None
 
-  def __call__(self, term):
-    self.ensure(term)
+  def collect(self, term, seen = None):
+    """Gather type constraints for this term and its subterms.
 
-  def ensure(self, term):
-    if term in self.sets:
-      return
+    If seen is provided, terms in seen will not be gathered.
+    """
+    for t in subterms(term, seen):
+      t.type_constraints(self)
 
-    assert isinstance(term, Value)
-    self._init_term(term)
+  def rep(self, term):
+    """Return the representative member of the unification set containing this
+    term. Creates and initializes a unification set if one did not previously
+    exist.
+    """
+    try:
+      return self.sets.rep(term)
+
+    except KeyError:
+      assert isinstance(term, Value)
+      self._init_term(term)
+      return term
 
   def _init_term(self, term):
     self.logger.debug('adding term %s', term)
@@ -116,14 +127,12 @@ class TypeConstraints(object):
     if t2 is self.default_rep:
       self.default_rep = t1
 
-  def eq_types(self, *terms):
-    for t in terms:
-      self.ensure(t)
 
+  def eq_types(self, *terms):
     it = iter(terms)
-    t1 = self.sets.rep(it.next())
+    t1 = self.rep(next(it))
     for t2 in it:
-      self.sets.unify(t1, t2, self._merge)
+      self.sets.unify(t1, self.rep(t2), self._merge)
 
   def _init_default(self, rep):
     self.specific(rep, predicate_default)
@@ -132,18 +141,17 @@ class TypeConstraints(object):
 
   def default(self, term):
     if self.default_rep is None:
-      self.ensure(term)
-      self._init_default(self.sets.rep(term))
+      self._init_default(self.rep(term))
     else:
       self.eq_types(term, self.default_rep)
 
   def specific(self, term, ty):
-    self.ensure(term)
+    r = self.rep(term)
+
     if ty is None:
       return
 
     self.logger.debug('specifying %s : %s', term, ty)
-    r = self.sets.rep(term)
     if r not in self.specifics:
       self.specifics[r] = ty
     if self.specifics[r] != ty:
@@ -153,8 +161,7 @@ class TypeConstraints(object):
         self.specifics[term]))
 
   def constrain(self, term, con):
-    self.ensure(term)
-    r = self.sets.rep(term)
+    r = self.rep(term)
     con0 = self.constraints[r]
 
     self.logger.debug('Refining constraint for %s: %s & %s', term, con, con0)
@@ -190,13 +197,13 @@ class TypeConstraints(object):
 
   def width_order(self, lo, hi):
     if isinstance(lo, Value):
-      self.ensure(lo)
-    self.ensure(hi)
+      lo = self.rep(lo)
+    hi = self.rep(hi)
     self.ordering.add((lo,hi))
 
   def width_equal(self, a, b):
-    self.ensure(a)
-    self.ensure(b)
+    a = self.rep(a)
+    b = self.rep(b)
     self.width_equalities.add((a,b))
 
   def validate(self):
