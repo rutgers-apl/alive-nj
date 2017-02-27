@@ -1,0 +1,5 @@
+; ERROR: Ambiguous type
+Pre: WillNotOverflowSignedAdd(zext(C), 1)
+%x = add %a, C
+=>
+%x = undef

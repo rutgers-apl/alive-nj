@@ -1,0 +1,5 @@
+Pre: fpMantissaWidth(%y) >= min(width(%x), width(%z))
+%y = uitofp i16 %x
+%z = fptoui %y to i8
+=>
+%z = ZExtOrTrunc %x

@@ -42,48 +42,19 @@ class Transform(pretty.PrettyRepr):
     seen = set()
 
     # find type variables from the source
-    for term in L.subterms(self.src, seen):
-      term.type_constraints(t)
+    t.collect(self.src, seen)
 
     # note the type variables fixed by the source
-    src_reps = tuple(t.sets.reps())
+    t.bind_reps()
 
-    defaultable = []
     if self.pre:
-      for term in L.subterms(self.pre, seen):
-        term.type_constraints(t)
+      t.collect(self.pre, seen)
 
-        # note the immediate arguments to Comparisons and predicates,
-        # in case they need to be defaulted later
-        if isinstance(term, (L.Comparison, L.FunPred)):
-          defaultable.extend(term.args())
-
-    for term in L.subterms(self.tgt, seen):
-      term.type_constraints(t)
-
+    t.collect(self.tgt, seen)
     t.eq_types(self.src, self.tgt)
 
-    # find any type variables not unified with a variable from the source
-    # (ie. which are newly introduced by the target or precondition)
-    reps = set(r for r in t.sets.reps()
-      if r not in t.specifics and t.constraints[r] != typing.BOOL)
-    for r in src_reps:
-      reps.discard(t.sets.rep(r))
-
-    # if any of the new variables are defaultable, then default them
-    if reps:
-      for term in defaultable:
-        r = t.sets.rep(term)
-        if r in reps:
-          t.default(r)
-          reps.discard(r)
-
-    # if any new type variables cannot be defaulted, then the transformation
-    # is ambiguously typed
-    if reps:
-      fmt = Formatter()
-      raise typing.Error('Ambiguous type for ' + ', '.join(
-          fmt.operand(term) for term in reps))
+    # ensure no ambiguously-typed values
+    t.set_defaultables()
 
     return t
 

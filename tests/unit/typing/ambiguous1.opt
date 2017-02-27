@@ -1,0 +1,6 @@
+; ERROR: Ambiguous type
+%z = add %a, %b
+=>
+%x = add %a, %b
+%y = zext %x
+%z = trunc %y

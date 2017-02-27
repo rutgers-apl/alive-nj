@@ -89,6 +89,8 @@ class TypeConstraints(object):
     self.width_equalities = set() # pairs (x,y) where width(x) == width(y)
     self.widthlimit = maxwidth+1
     self.default_rep = None
+    self.defaultable_reps = set()
+    self.bound_reps = set()
 
   def collect(self, term, seen = None):
     """Gather type constraints for this term and its subterms.
@@ -97,6 +99,13 @@ class TypeConstraints(object):
     """
     for t in subterms(term, seen):
       t.type_constraints(self)
+
+  def bind_reps(self):
+    """Mark all reps as bound. Useful for finding target/precondition terms
+    that did not unify with any source term.
+    """
+    # this arguably belongs in a subclass, but maintaining bound_reps is cheap
+    self.bound_reps = set(self.sets.reps())
 
   def rep(self, term):
     """Return the representative member of the unification set containing this
@@ -127,6 +136,13 @@ class TypeConstraints(object):
     if t2 is self.default_rep:
       self.default_rep = t1
 
+    if t2 in self.defaultable_reps:
+      self.defaultable_reps.remove(t2)
+      self.defaultable_reps.add(t1)
+
+    if t2 in self.bound_reps:
+      self.bound_reps.remove(t2)
+      self.bound_reps.add(t1)
 
   def eq_types(self, *terms):
     it = iter(terms)
@@ -144,6 +160,26 @@ class TypeConstraints(object):
       self._init_default(self.rep(term))
     else:
       self.eq_types(term, self.default_rep)
+
+  def defaultable(self, term):
+    """Mark this term as potentially having a default type.
+    """
+    self.defaultable_reps.add(self.rep(term))
+
+  def set_defaultables(self):
+    """Set unbound, defaultable values to the default type. Raise an error if
+    any unbound, non-defaultable values.
+    """
+    for r in self.sets.reps():
+      if r in self.bound_reps or r in self.specifics or \
+          self.constraints[r] == BOOL:
+        continue
+
+      if r in self.defaultable_reps:
+        self.default(r)
+
+      else:
+        raise Error('Ambiguous type for ' + _name(r))
 
   def specific(self, term, ty):
     r = self.rep(term)
@@ -511,20 +547,10 @@ class AbstractTypeModel(object):
     """
 
     tc = _ModelExtender(model=self)
-    defaultable = []
-    for t in subterms(term):
-      t.type_constraints(tc)
+    tc.collect(term)
 
-      # Note any defaultable terms for later
-      # (This duplicates logic in Transform; better to centralize this in
-      # type_constraints)
-      if isinstance(t, (Comparison, FunPred)):
-        defaultable.extend(t.args())
-
-    # check if any terms can be defaulted
-    logger.debug('defaultable: %s', defaultable)
-    for t in defaultable:
-      rep = tc.sets.rep(t)
+    # check for defaultable terms
+    for rep in tc.defaultable_reps:
       if rep not in tc.rep_tyvar:
         tc.default(rep)
 
@@ -581,6 +607,7 @@ class AbstractTypeModel(object):
         assert t not in context or context[t] == tyvar
         context[t] = tyvar
 
+# TODO: move Formatter out of alive.transform, and use it here
 def _name(term):
   return term.name if hasattr(term, 'name') else str(term)
 

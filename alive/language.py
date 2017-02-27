@@ -868,6 +868,7 @@ class Comparison(Predicate):
     else:
       tcs.number(self.x)
     tcs.eq_types(self.x, self.y)
+    tcs.defaultable(self.x)
 
 class FunPred(Predicate):
   __slots__ = ('_args',)
