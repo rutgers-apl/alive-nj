@@ -5,6 +5,7 @@ Apply typing constraints to the IR.
 from . import config
 from .language import *
 from .util import disjoint, pretty
+from .formatter import Formatter
 import logging, itertools
 import collections
 import weakref
@@ -192,7 +193,7 @@ class TypeConstraints(object):
       self.specifics[r] = ty
     if self.specifics[r] != ty:
       raise Error('Incompatible types for {}: {} and {}'.format(
-        term.name if hasattr(term, 'name') else str(term),
+        _name(term),
         ty,
         self.specifics[term]))
 
@@ -204,7 +205,7 @@ class TypeConstraints(object):
     c = most_specific(con0, con)
     if c is None:
       raise Error('Incompatible constraints for {}: {} and {}'.format(
-        term.name if hasattr(term, 'name') else str(term),
+        _name(term),
         _constraint_name[con],
         _constraint_name[con0]))
 
@@ -251,7 +252,7 @@ class TypeConstraints(object):
 
       if not meets_constraint(self.constraints[r], self.specifics[r]):
         raise Error('Incompatible constraints for {}: {} is not {}'.format(
-          r.name if hasattr(term, 'name') else str(r),
+          _name(r),
           self.specifics[r],
           _constraint_name[self.constraints[r]]))
 
@@ -314,7 +315,7 @@ class TypeConstraints(object):
         # if rep is in finished, but we haven't set it to true, then
         # we must have found a loop
         raise Error('Incompatible constraints for {}: circular ordering'.format(
-          rep.name if hasattr(rep, 'name') else str(rep)
+          _name(rep)
           ))
 
       finished[rep] = False
@@ -344,7 +345,7 @@ class TypeConstraints(object):
         specific[tyvar] = self.specifics[rep]
         if not meets_constraint(self.constraints[rep], self.specifics[rep]):
           raise Error('Incompatible constraints for {}: {} is not {}'.format(
-            rep.name if hasattr(rep, 'name') else str(r),
+            _name(rep),
             self.specifics[rep],
             _constraint_name[self.constraints[rep]]))
 
@@ -607,9 +608,8 @@ class AbstractTypeModel(object):
         assert t not in context or context[t] == tyvar
         context[t] = tyvar
 
-# TODO: move Formatter out of alive.transform, and use it here
 def _name(term):
-  return term.name if hasattr(term, 'name') else str(term)
+  return Formatter().operand(term)
 
 class _ModelExtender(TypeConstraints):
   """Used by AbstractTypeModel.extend.

@@ -3,6 +3,7 @@ Defines the internal representation as nodes in a DAG.
 '''
 
 from .util import pretty
+import collections
 import itertools
 import operator
 
@@ -1073,6 +1074,36 @@ def proper_subterms(term):
   seen = set()
 
   return itertools.chain.from_iterable(subterms(a, seen) for a in term.args())
+
+
+def count_uses(dag, uses=None):
+  """Count the number of times each subterm is referenced.
+  """
+  if uses is None:
+    uses = collections.Counter()
+
+  def walk(v):
+    for a in v.args():
+      if a not in uses:
+        walk(a)
+      uses[a] += 1
+
+  walk(dag)
+  return uses
+
+
+def constant_defs(tgt, terms=[]):
+  """Generate shared constant terms from the target and precondition.
+
+  Terms are generated before any terms that reference them.
+  """
+  uses = count_uses(tgt)
+  for t in terms:
+    count_uses(t, uses)
+
+  for t in subterms(tgt):
+    if uses[t] > 1 and isinstance(t, Constant) and not isinstance(t, Symbol):
+      yield t
 
 
 # Errors

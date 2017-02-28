@@ -3,7 +3,7 @@ from .. import language as L
 from .. import typing
 from .. import smtinterp
 from .. import config
-from ..transform import Formatted
+from ..formatter import Formatted, format_parts
 from ..util.pretty import pformat
 from ..z3util import mk_and, mk_or, mk_not, mk_forall
 import collections
@@ -1334,7 +1334,7 @@ def main(
     solver_negatives = 10,
   ):
   import argparse, sys, logging.config
-  from alive import config, transform
+  from alive import config
   from alive.parser import read_opt_files
   from alive.util.args import NegatableFlag
   logging.config.dictConfig(config.logs)
@@ -1397,7 +1397,7 @@ def main(
         if opt.pre:
           hds.append(('Pre:', opt.pre))
         hds.extend(('Feature:', t) for t in features)
-        print Formatted(transform.format_parts(opt.name, hds, opt.src, opt.tgt))
+        print Formatted(format_parts(opt.name, hds, opt.src, opt.tgt))
 
       set_reporter(Reporter())
 
@@ -1424,7 +1424,7 @@ def main(
             [('Pre:', pre)] if pre else []
 
           print
-          print Formatted(transform.format_parts(opt.name,hds,opt.src,opt.tgt))
+          print Formatted(format_parts(opt.name,hds,opt.src,opt.tgt))
           print '''; positive examples {1:,} of {0.num_good_cases:,}
 ; negative examples {0.num_bad_cases:,}
 ; accepted features {0.features:,}
