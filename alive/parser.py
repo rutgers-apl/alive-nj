@@ -557,7 +557,7 @@ instr.setName('Instruction')
 #instrs = OneOrMore(instr - LineEnd().suppress())
 
 class TransformAST(Ast):
-  def eval(self, include_assumptions=True, extended_results=False):
+  def eval(self, extended_results=False):
     t = self.toks
     name = t.name[0] if t.name else ''
     root = t.src[-1].name()
@@ -583,25 +583,15 @@ class TransformAST(Ast):
     for h in t.headers:
       headers[h[0]].append(h[1].condition(ids))
 
-    if include_assumptions and not extended_results:
-      preconditions = assumptions + preconditions
-
-    if len(preconditions) > 1:
-      precondition = L.AndPred(*preconditions)
-    elif preconditions:
-      precondition = preconditions[0]
-    else:
-      precondition = None
-
     src = ids.pop(root)
     for i in t.tgt:
       if not isinstance(i, CDefAst):
         i.eval(ids, Phase.Target)
 
-    transform = Transform(src, ids[root], precondition, name)
+    transform = Transform(src, ids[root], preconditions, assumptions, name)
 
     if extended_results:
-      return transform, features, assumptions
+      return transform, features
 
     return transform
 
@@ -708,10 +698,9 @@ def test(s = '%a = add i8 %b, %c', t = None):
       print e.line
       print ' ' * (e.col-1) + '^'
 
-def parse_transform(s, include_assumptions=True, extended_results=False):
+def parse_transform(s, extended_results=False):
   try:
-    return transform.parseString(s, True)[0].eval(
-      include_assumptions, extended_results)
+    return transform.parseString(s, True)[0].eval(extended_results)
   except ParseBaseException, e:
     print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
     if e.pstr:
@@ -719,10 +708,10 @@ def parse_transform(s, include_assumptions=True, extended_results=False):
       print ' ' * (e.col-1) + '^'
     raise
 
-def parse_opt_file(s, include_assumptions=True, extended_results=False):
+def parse_opt_file(s, extended_results=False):
   'Wrapper for transforms.parseString which exits program on exceptions.'
   try:
-    return [t.eval(include_assumptions, extended_results)
+    return [t.eval(extended_results)
             for t in transforms.parseString(s, True)]
   except ParseBaseException, e:
     print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
@@ -731,12 +720,12 @@ def parse_opt_file(s, include_assumptions=True, extended_results=False):
       print ' ' * (e.col-1) + '^'
     exit(-1)
 
-def read_opt_files(files, include_assumptions=True, extended_results=False):
+def read_opt_files(files, extended_results=False):
   for f in files:
     if f.isatty():
       sys.stderr.write('[Reading from terminal...]\n')
 
-    for opt in parse_opt_file(f.read(), include_assumptions, extended_results):
+    for opt in parse_opt_file(f.read(), extended_results):
       yield opt
 
 

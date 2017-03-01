@@ -22,16 +22,15 @@ def check(opt, type_model, translator=config.translator):
   translator = smtinterp.SMTTranslator.registry[translator]
   smt = translator(type_model)
 
-  if opt.pre:
-    pre = smt(opt.pre)
-    assert not pre.defined and not pre.nonpoison and not pre.qvars
-      # TODO: make this an exception, or do something reasonable for these
-      # it is unclear what qvars in the precondition would mean
-    premise = pre.aux + [pre.value]
-    pre_safe = pre.safe
-  else:
-    pre_safe = []
-    premise = []
+  asm = smt.conjunction(opt.asm)
+  assert not asm.defined and not asm.nonpoison and not asm.qvars
+  premise = asm.aux + asm.safe + asm.value
+
+  pre = smt.conjunction(opt.pre)
+  assert not pre.defined and not pre.nonpoison and not pre.qvars
+    # TODO: make this an exception, or do something reasonable for these
+    # it is unclear what qvars in the precondition would mean
+  premise += pre.aux
 
   src = smt(opt.src)
   assert not src.aux
@@ -44,8 +43,10 @@ def check(opt, type_model, translator=config.translator):
     return CounterExampleError(
       c, m, type_model, opt.src, src.value, tgt.value, translator)
 
-  if pre_safe:
-    check_expr(PRESAFE, mk_not(pre_safe), opt, err)
+  if pre.safe:
+    check_expr(PRESAFE, mk_and(premise + [mk_not(pre.safe)]), opt, err)
+
+  premise += pre.value
 
   if tgt.safe:
     check_expr(TGTSAFE, mk_and(premise + [mk_not(tgt.safe)]), opt, err)

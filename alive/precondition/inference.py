@@ -823,16 +823,9 @@ def interpret_opt(translator, opt, assumptions=(), strengthen=False):
   # Care must be taken to keep this and alive.refinement compatible.
 
   # initial premise: assumptions are safe and satisfied
-  premise = []
-  for a in assumptions:
-    smt = translator(a)
-
-    # assumptions should never be ill-defined
-    assert not smt.defined and not smt.nonpoison and not smt.qvars
-
-    premise += smt.aux
-    premise += smt.safe
-    premise.append(smt.value)
+  smt = translator.conjunction(assumptions)
+  assert not smt.defined and not smt.nonpoison and not smt.qvars
+  premise = smt.aux + smt.safe + smt.value
 
   src = translator(opt.src)
 
@@ -856,11 +849,11 @@ def interpret_opt(translator, opt, assumptions=(), strengthen=False):
     body += mk_implies(filter, tgt.nonpoison + [src.value == tgt.value])
 
   if strengthen:
-    pre = translator(opt.pre)
+    pre = translator.conjunction(opt.pre)
     assert not pre.defined and not pre.nonpoison and not pre.qvars
     premise += pre.aux
     premise += pre.safe
-    body.append(pre.value)
+    body += pre.value
 
   return premise, body, filter
 
@@ -1147,8 +1140,9 @@ def infer_precondition(opt,
   # FIXME: remove or formalize test of given precondition
   if opt.pre:
     cache = {}
-    prepos = sum(1 for e in goods if test_feature(opt.pre, e, cache) == ACCEPT)
-    preneg = sum(1 for e in bads if test_feature(opt.pre, e, cache) != ACCEPT)
+    pre = L.AndPred(*opt.pre)
+    prepos = sum(1 for e in goods if test_feature(pre, e, cache) == ACCEPT)
+    preneg = sum(1 for e in bads if test_feature(pre, e, cache) != ACCEPT)
     msg = 'Accepts {}/{} positive; rejects {}/{} negative'.format(
       prepos, len(goods), preneg, len(bads))
     reporter.clear_message()
@@ -1378,24 +1372,24 @@ def main(
 
   try:
 
-    for opt,features,assumes in read_opt_files(args.file, extended_results=True):
+    for opt,features in read_opt_files(args.file, extended_results=True):
       print '; -----'
 
-      if not args.assumptions:
-        assumes = []
+      assumes = []
+      if args.assumptions:
+        assumes += opt.asm
       if args.assume_pre:
-        assumes.append(opt.pre)
+        assumes += opt.pre
 
       if not args.features:
         features = []
       if args.pre_features and opt.pre:
-        features.extend(t for t in L.subterms(opt.pre)
+        features.extend(t for p in opt.pre for t in L.subterms(p)
                           if isinstance(t, (L.Comparison, L.FunPred)))
 
       if args.echo:
         hds = [('Assume:', t) for t in assumes]
-        if opt.pre:
-          hds.append(('Pre:', opt.pre))
+        hds.extend(('Pre:', t) for t in opt.pre)
         hds.extend(('Feature:', t) for t in features)
         print Formatted(format_parts(opt.name, hds, opt.src, opt.tgt))
 

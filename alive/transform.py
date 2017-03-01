@@ -14,15 +14,16 @@ logger = logging.getLogger(__name__)
 
 
 class Transform(pretty.PrettyRepr):
-  def __init__(self, src, tgt, pre=None, name=''):
+  def __init__(self, src, tgt, pre=(), asm=(), name=''):
     self.name = name
     self.pre = pre
+    self.asm = asm
     self.src = src
     self.tgt = tgt
 
   def pretty(self):
     return pretty.pfun(type(self).__name__,
-      (self.src, self.tgt, self.pre, self.name))
+      (self.src, self.tgt, self.pre, self.asm, self.name))
 
   def subterms(self):
     """Generate all terms in the transform, without repeats.
@@ -32,7 +33,8 @@ class Transform(pretty.PrettyRepr):
     return itertools.chain(
       L.subterms(self.src, seen),
       L.subterms(self.tgt, seen),
-      () if self.pre is None else L.subterms(self.pre, seen)
+      itertools.chain.from_iterable(L.subterms(p, seen) for p in self.pre),
+      itertools.chain.from_iterable(L.subterms(p, seen) for p in self.asm),
     )
 
   def type_constraints(self):
@@ -47,8 +49,11 @@ class Transform(pretty.PrettyRepr):
     # note the type variables fixed by the source
     t.bind_reps()
 
-    if self.pre:
-      t.collect(self.pre, seen)
+    for p in self.asm:
+      t.collect(p, seen)
+
+    for p in self.pre:
+      t.collect(p, seen)
 
     t.collect(self.tgt, seen)
     t.eq_types(self.src, self.tgt)
@@ -93,7 +98,7 @@ class Transform(pretty.PrettyRepr):
     Terms are generated before any terms that reference them.
     """
 
-    return constant_defs(self.tgt, [self.pre] if self.pre else [])
+    return constant_defs(self.tgt, self.pre + self.asm)
 
   def format(self):
     return Formatted(self)
@@ -103,7 +108,7 @@ class Transform(pretty.PrettyRepr):
 def _(opt, fmt, prec):
   return format_parts(
     opt.name,
-    [('Pre:', opt.pre)] if opt.pre else [],
+    [('Assume:', p) for p in opt.asm] + [('Pre:', p) for p in opt.pre],
     opt.src,
     opt.tgt,
     fmt)

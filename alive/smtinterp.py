@@ -97,6 +97,35 @@ class BaseSMTTranslator():
       qvars = self.qvars,
     )
 
+  def _conjunction(self, clauses):
+    context = []
+
+    for c in clauses:
+      with self.local_safe() as s:
+        p = self.eval(c)
+
+      self.add_safe(*mk_implies(context, s))
+      context.append(p)
+
+    return context
+
+  def conjunction(self, clauses):
+    """Interpret a list of predicates in a fresh context.
+
+    The Interp.value returned will be a list of SMT expressions.
+    """
+    self.reset()
+    ps = self._conjunction(clauses)
+    return Interp(
+      value = ps,
+      defined = self.defs,
+      nonpoison = self.nops,
+      safe = self._safe,
+      aux = self._aux,
+      qvars = self.qvars,
+    )
+
+
   def add_defs(self, *defs):
     """Add well-defined conditions to the current translator context.
     """
@@ -881,16 +910,7 @@ def mk_implies(premises, consequents):
 
 @eval.register(AndPred, BaseSMTTranslator)
 def _(term, smt):
-  context = []
-
-  for c in term.clauses:
-    with smt.local_safe() as s:
-      p = smt.eval(c)
-
-    smt.add_safe(*mk_implies(context, s))
-    context.append(p)
-
-  return mk_and(context)
+  return mk_and(smt._conjunction(term.clauses))
 
 @eval.register(OrPred, BaseSMTTranslator)
 def _(term, smt):
