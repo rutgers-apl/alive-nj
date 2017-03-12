@@ -254,7 +254,7 @@ class CDefAst(Ast):
     c = self.toks.lhs.id
 
     if c in ids:
-      self._fatal('Redefinition of ' + r)
+      self._fatal('Redefinition of ' + c)
 
     val = self.toks.rhs.value(None, ids, phase)
 
