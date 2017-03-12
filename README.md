@@ -62,3 +62,89 @@ Alive-NJ does not include, or does not fully implement, these features:
 * Memory operations (`alloca`, `store`, `load`, `getelementpointer`)
 * Pointer types
 * Composition of optimizations and non-termination checking
+
+
+## Precondition Inference
+
+Alive-NJ includes a tool for inferring preconditions for Alive optimizations,
+detailed in the paper ["Alive-Infer: Data-Driven Precondition Inference for 
+Peephole Optimizations in LLVM"][Alive-Infer]. You might use this tool if an
+optimization you have developed is invalid, and you need to find a stronger
+precondition, or if you want to weaken the precondition of an optimization so
+that it can be used on more programs.
+
+[Alive-Infer]: http://export.arxiv.org/abs/1611.05980
+
+### Usage:
+
+To infer preconditions for all optimizations given in a file:
+
+    ./infer.py [file [file...]]
+
+Alive-Infer reads from standard input if no files are given.
+
+To get a list of options:
+
+    ./infer.py --help
+
+Most options can be negated. For example, `--incompletes` vs `--no-incompletes`.
+In case of a conflict, the last option wins.
+
+Alive-Infer only returns preconditions which are valid, meaning they reject
+all input programs where the optimization would change the semantics.
+Alive-Infer attempts to find preconditions which accept *all* input programs
+where the optimization is valid. This may result in too-complex preconditions,
+or require too much time to run.
+
+If `--incompletes` is set, Alive-Infer will also generate valid and succinct
+preconditions which may exclude some input programs where the optimization is
+valid.
+
+### Input format
+
+Alive-Infer extends the Alive language with headers which provide more
+information to the inference engine. To illustrate:
+
+    Name: AndOrXor:1628-1
+    Feature: isPowerOf2(-C2 ^ -C1)
+    Feature: -C2 ^ -C1 == (C3-C2) ^ (C3-C1)
+    Feature: abs(C1-C2) u> C3
+    Assume: C1 != 0 && C2 != 0
+    Pre: C1 u> C3 && C2 u> C3 && isPowerOf2(C1 ^ C2)
+      %a1     = add i29 %A, C1
+      %a2     = add %A, C2
+      %cmp1   = icmp ult %a1, C3
+      %cmp2   = icmp ult %a2, C3
+      %r      = or %cmp1, %cmp2
+    =>
+      %newand = and %A, ~(C1^C2)
+      %newadd = add %newand, umax(C1, C2)
+      %r      = icmp ult %newadd, C3
+
+`Feature:` headers suggest predicates to the inference engine. Use
+`--no-features` to ignore these headers.
+
+`Assume:` headers indicate conditions that should never occur. The
+precondition is not required to accept or reject input programs which violate
+the assumptions. Use `--no-assumptions` to ignore these headers.
+
+`Pre:` headers are normally ignored during inference. However, certain options
+tell Alive-Infer to use this specified precondition:
+
+* If `--pre-features` is set, Alive-Infer will treat the predicates in `Pre:` as
+  if they had been suggested using `Feature:`.
+* If `--assume-pre` is set, Alive-Infer will treat `Pre:` as if it were
+  `Assume:`.
+* If `--strengthen` is set, Alive-Infer will attempt to find a precondition
+  which makes the optimization valid *and* implies the given precondition.
+
+### Customization
+
+If you find yourself using the same options frequently, you can customize
+`infer.py` by creating a copy and adding keyword arguments to its call to
+`main()`.
+
+For example, to make `--pre-features` set by default, use:
+
+    main(pre_features = True)
+
