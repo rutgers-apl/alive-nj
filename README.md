@@ -15,12 +15,17 @@ Alive requires Python 2.7 and Z3 4.3.2 or later.
 
 Z3 can be obtained from https://github.com/Z3Prover/z3
 
-## Usage
+## Verification
+
+To verify all the optimizations in a file:
 
     ./run.py [file [file...]]
-    ./run.py --help
 
 Alive-NJ reads from standard input if no arguments are given.
+
+To get a list of options:
+
+    ./run.py --help
 
 ## Differences from Alive
 
@@ -46,6 +51,18 @@ Alive-NJ adds these features:
   `C2 = trunc(C1)`. These symbols are in scope in the precondition and target,
   so `zext(C2) == C1` is a valid precondition. Note that, unlike `trunc(C1)`,
   all uses of `C2` will have the same type.
+* Checks for compile-time undefined behavior. For example, a precondition
+  `C1 % C2 == 0` will be rejected unless `C2` is guaranteed to be nonzero.
+* An explicit `poison` value.
+* Support for the recently-proposed `freeze` instruction.
+* Choice of semantics for verification, using the `--translator` option.
+  Available translators include:
+    * `smtundef` Uses `undef` when the conditions of fast-math attributes are
+       violated.
+    * `smtpoison` Uses `poison` when the conditions of fast-math attributes are
+      violated.
+    * `poisononly` Allows the `freeze` instruction, and prevents `poison`
+      from propagating through the unchosen branch of a `select` instruction.
 
 We have found the following bugs with the floating point support in Alive-NJ:
 
@@ -75,7 +92,7 @@ that it can be used on more programs.
 
 [Alive-Infer]: http://export.arxiv.org/abs/1611.05980
 
-### Usage:
+### Usage
 
 To infer preconditions for all optimizations given in a file:
 
