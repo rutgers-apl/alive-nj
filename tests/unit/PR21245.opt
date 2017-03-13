@@ -1,4 +1,4 @@
-; ERROR: Mismatch in values
+; ERROR: Target introduces undefined behavior
 Assume: C1 u< width(%r)
 Pre: C2 % (1<<C1) == 0
 %s = shl nsw %X, C1

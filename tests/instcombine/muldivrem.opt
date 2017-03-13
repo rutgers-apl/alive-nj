@@ -401,6 +401,7 @@ Pre: C2 % (1<<C1) == 0 && C1 != width(C1)-1 && C2 / (1 << C1) != -1
 
 Name: 764-3
 ; FIXME: slow
+Assume: C1 u< width(C1)
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw i9 %X, C1
 %r = udiv %s, C2
@@ -410,6 +411,7 @@ Pre: C2 %u (1<<C1) == 0
 
 Name: 764-4
 ; FIXME: slow
+Assume: C1 u< width(C1)
 Pre: C2 %u (1<<C1) == 0
 %s = shl nuw i7 %X, C1
 %r = udiv exact %s, C2
