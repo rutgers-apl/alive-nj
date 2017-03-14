@@ -1313,16 +1313,17 @@ def set_translator(translator):
 
 
 def main(
-    strengthen = False,
-    weakest = False,
+    incompletes = True,
     assume_pre = False,
     pre_features = False,
-    incompletes = True,
+    strengthen = False,
+    weakest = True,
     first_only = False,
     use_assumptions = True,
     use_features = True,
     echo = True,
     strategy = 'largest',
+    translator = config.translator,
     random_examples = 500,
     solver_positives = 10,
     solver_negatives = 10,
@@ -1333,22 +1334,24 @@ def main(
   from alive.util.args import NegatableFlag
   logging.config.dictConfig(config.logs)
 
-  parser = argparse.ArgumentParser()
+  parser = argparse.ArgumentParser(
+    description='Infer preconditions for each provided optimization'
+  )
+  parser.add_argument('-i', '--incompletes', action=NegatableFlag,
+    default=incompletes,
+    help='Report too-strong preconditions during inference')
+  parser.add_argument('-a', '--assume-pre', action=NegatableFlag,
+    default=assume_pre,
+    help='Treat precondition as an assumption')
+  parser.add_argument('-f', '--pre-features', action=NegatableFlag,
+    default=pre_features,
+    help='Take clauses from precondition as initial features')
   parser.add_argument('--strengthen', action=NegatableFlag,
     default=strengthen,
     help='Find a stronger precondition')
   parser.add_argument('--weakest', action=NegatableFlag,
     default=weakest,
     help='Ensure precondition accepts all valid instances')
-  parser.add_argument('--assume-pre', action=NegatableFlag,
-    default=assume_pre,
-    help='Treat precondition as an assumption')
-  parser.add_argument('--pre-features', action=NegatableFlag,
-    default=pre_features,
-    help='Take clauses from precondition as initial features')
-  parser.add_argument('--incompletes', action=NegatableFlag,
-    default=incompletes,
-    help='Report too-strong preconditions during inference')
   parser.add_argument('--first-only', action=NegatableFlag,
     default=first_only,
     help='Stop after the first valid precondition')
@@ -1358,6 +1361,15 @@ def main(
   parser.add_argument('--features', action=NegatableFlag,
     default=use_features,
     help='Use features provided in Feature: headers')
+  parser.add_argument('-p', '--positives', type=int,
+    default=solver_positives,
+    help='Number of positive examples to obtain with queries')
+  parser.add_argument('-n', '--negatives', type=int,
+    default=solver_negatives,
+    help='Number of negative examples to obtain with queries')
+  parser.add_argument('-r', '--randoms', type=int,
+    default=random_examples,
+    help='Number of randomly-chosen examples, per type assignment')
   parser.add_argument('--echo', action=NegatableFlag,
     default=echo,
     help='Print the input optimizations before inferring')
@@ -1365,12 +1377,16 @@ def main(
     default=strategy,
     choices=cs_strategies,
     help='Method for choosing conflict set')
+  parser.add_argument('--translator', action='store',
+    default=translator,
+    help='Specify variant of Alive/LLVM semantics')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin])
 
   args = parser.parse_args()
 
   try:
+    set_translator(args.translator)
 
     for opt,features in read_opt_files(args.file, extended_results=True):
       print '; -----'
@@ -1400,9 +1416,9 @@ def main(
         weakest = args.weakest,
         features = features,
         assumptions = assumes,
-        random_cases = random_examples,
-        solver_good = solver_positives,
-        solver_bad = solver_negatives,
+        random_cases = args.randoms,
+        solver_good = args.positives,
+        solver_bad = args.negatives,
         incompletes = args.incompletes,
         conflict_set = cs_strategies[args.strategy])
 
