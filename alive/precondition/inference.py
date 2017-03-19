@@ -797,7 +797,7 @@ def get_models(expr, vars):
 
   while res == z3.sat:
     model = s.model()
-    yield tuple((v,model[v]) for v in vars)
+    yield tuple((v,model.evaluate(v, model_completion=True)) for v in vars)
 
     s.add(z3.Or([v != model[v] for v in vars]))
     res = s.check()
@@ -1059,16 +1059,129 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
       itertools.islice(get_models(e, symbol_smts), solver_good))
 
     if false_negatives:
-      # filter out any None values Z3 may have returned
-      false_negatives = [TestCase(type_vector, tc) for tc in false_negatives
-        if full_model(tc)]
+      # This is essentially an assert, except we want to get logs if it
+      # goes wrong
+      if any(not full_model(tc) for tc in counter_examples):
+        log.error('Got incomplete model %s\n%s', counter_examples, e)
+        raise Failure('Incomplete model. Please send us the log.')
 
-      if not false_negatives:
-        raise MissingFalseNegatives
-
-      return false_negatives
+      return [TestCase(type_vector, tc) for tc in false_negatives]
 
   return []
+
+def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
+  """Check whether a pre-precondition ensures the safety of a precondition.
+  Returns (counter_examples, safe_examples), where counter_examples
+  are accepted by prepre, but unsafe for pre and safe_examples are
+  rejected by prepre but safely accepted by pre.
+
+  assumptions - conditions which always hold
+  pre    - a precondition. Assumed to only accept positive examples
+  prepre - should be safe and ensure pre is safe
+  """
+  log = logger.getChild('check_safety')
+  log.debug('Checking precondition safety')
+
+  for type_vector in type_model.type_vectors():
+    log.debug('Checking types %s', type_vector)
+    reporter.test_precondition()
+    smt = Translator(type_vector)
+
+    P  = smt(pre)
+    assert not P.qvars and not P.defined and not P.nonpoison
+
+    if not P.safe:
+      continue
+
+    A = smt.conjunction(assumptions)
+    assert not A.qvars and not A.defined and not A.nonpoison
+    premise = A.aux + A.safe + A.value
+
+    PP = smt(prepre)
+    assert not PP.qvars and not PP.defined and not PP.nonpoison
+
+    symbol_smts = [smt.eval(t) for t in symbols]
+
+    # check safety of pre-precondition
+    if PP.safe:
+      query = mk_and(premise + mk_not(PP.safe))
+      log.debug('Prepre safety:\n%s', query)
+
+      counter_examples = list(
+        itertools.islice(get_models(query, symbol_smts), 1))
+
+      if counter_examples:
+        # FIXME: handle unsafe pre-precondition
+        log.error('Unsafe examples for precondition precondition: %s',
+          counter_examples)
+        raise Exception('Unsafe examples for precondition precondition')
+
+    query = mk_and(premise + PP.aux + P.aux + [PP.value, mk_not(P.safe)])
+
+    log.debug('Pre-pre strength:\n%s', query)
+
+    counter_examples = list(
+      itertools.islice(get_models(query, symbol_smts), solver_unsafe))
+
+    if counter_examples:
+      log.info('Unsafe examples: %s', counter_examples)
+      return [TestCase(type_vector, tc) for tc in counter_examples], []
+
+    # check whether PP rejects examples that P safely accepts
+    query = mk_and(premise + PP.aux + P.aux + P.safe +
+      [P.value, z3.Not(PP.value)])
+    log.debug('Pre-pre weakness:\n%s', query)
+
+    positive_examples = list(
+      itertools.islice(get_models(query, symbol_smts), solver_unsafe))
+      # FIXME: don't use solver_unsafe here probably
+
+    if positive_examples:
+      log.info('False unsafe: %s', positive_examples)
+      return [], [TestCase(type_vector, tc) for tc in positive_examples]
+
+  return [], []
+
+def ensure_safety(pre, assumptions, config, symbols, positives, negatives,
+    initial_features = (),
+    solver_unsafe = 10):
+  """Make sure the precondition is always safe to evaluate. Given a precondition
+  P with safety condition Sp and assumptions A, finds a precondition P' such
+  that A && P' is always safe and A && Sp && P <=> A && P'.
+
+  Note: positives may have additional examples added which satisfy A && Sp && P.
+  """
+  log = logger.getChild('infer')
+
+  # obtain unsafe negative examples
+  cache = {}
+  unsafe = [e for e in negatives if test_feature(pre, e, cache) == UNSAFE]
+  if not unsafe:
+    unsafe, _ = check_safety(
+      assumptions, pre, L.AndPred(), config.model, symbols, solver_unsafe)
+
+  log.info('Unsafe examples: %s', len(unsafe))
+
+  if not unsafe:
+    return pre
+
+  gen = infer_preconditions_by_examples(config, positives, unsafe,
+    features = initial_features)
+
+  for prepre, _, _ in gen:
+    log.info('Inferred precondition precondition\n  %s',
+      Formatted(prepre, indent=2, start_at=2))
+
+    unsafe_examples, safe_examples = check_safety(
+      assumptions, pre, prepre, config.model, symbols, solver_unsafe)
+
+    if not unsafe_examples and not safe_examples:
+      return L.AndPred(prepre, pre)
+
+    positives += safe_examples
+    unsafe    += unsafe_examples
+    reporter.test_cases(positives, unsafe)
+    gen.throw(MoreExamples)
 
 
 def infer_precondition(opt,
@@ -1171,6 +1284,10 @@ def infer_precondition(opt,
       reporter.test_cases(goods, bads)
       pres.throw(MoreExamples)
       continue
+
+    # FIXME: add a flag to enable ensure_safety
+    # TODO: accumulate a list of features used in the pre-precondition
+    pre = ensure_safety(pre, assumptions, config, symbols, goods, bads)
 
     # sound but possibly incomplete
     yield pre, coverage, ifeatures
