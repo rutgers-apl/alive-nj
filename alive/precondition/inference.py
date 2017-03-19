@@ -257,7 +257,7 @@ def learn_boolean(feature_count, goods, bads):
     k += 1
     if k > feature_count:
       log.error('Unable to learn boolean\n%s\n%s', goods, bads)
-      raise Exception('Unable to learn boolean')
+      raise Failure('Unable to learn boolean')
 
     reporter.increase_clause_size()
     clauses.extend(c for c in all_clauses(feature_count, k)
@@ -803,7 +803,8 @@ def get_models(expr, vars):
     res = s.check()
 
   if res == z3.unknown:
-    raise Exception('Solver returned unknown: ' + s.reason_unknown())
+    logger.error('get_models got unknown: %s\n%s', s.reason_unknown(), s)
+    raise Failure('Solver returned unknown: ' + s.reason_unknown())
 
 def interpret_opt(translator, opt, assumptions=(), strengthen=False):
   """Translate body of opt using SMT translator.
@@ -831,7 +832,8 @@ def interpret_opt(translator, opt, assumptions=(), strengthen=False):
 
   assert not src.aux and not src.safe
   if src.qvars:
-    raise Exception("Quantified variables in opt {!r}".format(opt.name))
+    raise Failure("Quantified variables in opt {!r}".format(opt.name))
+    # FIXME: This indicates an inappropriate input, not a bug
 
   tgt = translator(opt.tgt)
 
@@ -1016,13 +1018,13 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
       itertools.islice(get_models(e, symbol_smts), solver_bad))
 
     if counter_examples:
-      counter_examples = [TestCase(type_vector, tc) for tc in counter_examples
-        if full_model(tc)]
+      # This is essentially an assert, except we want to get logs if it
+      # goes wrong
+      if any(not full_model(tc) for tc in counter_examples):
+        log.error('Got incomplete model %s\n%s', counter_examples, e)
+        raise Failure('Incomplete model. Please send us the log.')
 
-      if not counter_examples:
-        raise MissingFalsePositives
-
-      return counter_examples
+      return [TestCase(type_vector, tc) for tc in counter_examples]
 
   return []
 
@@ -1114,7 +1116,7 @@ def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
         # FIXME: handle unsafe pre-precondition
         log.error('Unsafe examples for precondition precondition: %s',
           counter_examples)
-        raise Exception('Unsafe examples for precondition precondition')
+        raise Failure('Unsafe examples for precondition precondition')
 
     query = mk_and(premise + PP.aux + P.aux + [PP.value, mk_not(P.safe)])
 
@@ -1243,7 +1245,8 @@ def infer_precondition(opt,
 
     log.info('Full Examples: %s positive, %s negative', len(goods), len(bads))
     if not goods:
-      raise NoPositives
+      raise Failure('No positive examples')
+      # FIXME: this indicates an inappropriate input, not a bug
 
   if not bads:
     yield None, len(goods), []
@@ -1311,11 +1314,8 @@ def infer_precondition(opt,
 
 # ----
 
-class NoPositives(Exception):
+class Failure(Exception):
   pass
-
-class MissingFalseNegatives(Exception): pass
-class MissingFalsePositives(Exception): pass
 
 import sys, os
 
@@ -1562,15 +1562,9 @@ def main(
           reporter.clear_message()
           print '; precondition is complete'
 
-      except NoPositives:
+      except Failure as e:
         reporter.clear_message()
-        print '; Failure: No positive instances'
-      except MissingFalsePositives:
-        reporter.clear_message()
-        print '; Failure: Validity not proven'
-      except MissingFalseNegatives:
-        reporter.clear_message()
-        print '; Failure: Completeness not proven'
+        print '; FAILURE:', e
 
   except KeyboardInterrupt:
     sys.stderr.write('\n[Keyboard interrupt]\n')
