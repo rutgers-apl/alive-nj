@@ -779,6 +779,9 @@ def satisfiable(expr, substitutes):
   """Return whether expr can be satisfied, given the substitutions.
   """
   s = z3.Solver()
+  if config.timeout is not None:
+    s.set('timeout', config.timeout)
+
   s.add(z3.substitute(expr, *substitutes))
   res = s.check()
 
@@ -792,6 +795,9 @@ def get_models(expr, vars):
   """
 
   s = z3.Solver()
+  if config.timeout is not None:
+    s.set('timeout', config.timeout)
+
   s.add(expr)
   res = s.check()
 
