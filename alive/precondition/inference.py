@@ -1069,8 +1069,8 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     if false_negatives:
       # This is essentially an assert, except we want to get logs if it
       # goes wrong
-      if any(not full_model(tc) for tc in counter_examples):
-        log.error('Got incomplete model %s\n%s', counter_examples, e)
+      if any(not full_model(tc) for tc in false_negatives):
+        log.error('Got incomplete model %s\n%s', false_negatives, e)
         raise Failure('Incomplete model. Please send us the log.')
 
       return [TestCase(type_vector, tc) for tc in false_negatives]
