@@ -3,6 +3,7 @@ Defines the internal representation as nodes in a DAG.
 '''
 
 from .util import pretty
+from . import error
 import collections
 import itertools
 import operator
@@ -1125,7 +1126,7 @@ def constant_defs(tgt, terms=[]):
 # Errors
 # ------
 
-class BadArgumentCount(Exception):
+class BadArgumentCount(error.Error):
   def __init__(self, wanted, got):
     self.wanted = wanted
     self.got = got
@@ -1133,7 +1134,7 @@ class BadArgumentCount(Exception):
   def __str__(self):
     return 'expected {} received {}'.format(self.wanted, self.got)
 
-class BadArgumentKind(Exception):
+class BadArgumentKind(error.Error):
   def __init__(self, idx, kind):
     self.idx = idx
     self.kind = kind

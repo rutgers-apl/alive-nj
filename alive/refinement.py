@@ -3,6 +3,7 @@ Refinement checking for optimizations.
 '''
 
 from . import config
+from . import error
 from . import smtinterp
 from . import typing
 import z3
@@ -137,9 +138,8 @@ def format_z3val(val):
   if isinstance(val, z3.FPRef):
     return str(val)
 
-class Error(Exception):
-  def write(self):
-    print 'ERROR:', self
+class Error(error.Error):
+  pass
 
 class CounterExampleError(Error):
   def __init__(self, cause, model, types, src, srcv, tgtv, trans):
@@ -159,58 +159,62 @@ class CounterExampleError(Error):
     UNEQUAL: 'Mismatch in values',
     }
 
-  def write(self):
-    print 'ERROR:', self.cause_str[self.cause],
-    print 'for', self.types[typing.context[self.src]], self.src.name
-    print
+  def __str__(self):
 
     smt = self.trans(self.types)
 
     vars = [v for v in proper_subterms(self.src)
-                if isinstance(v, (Input, Instruction))]
+              if isinstance(v, (Input, Instruction))]
 
-# this bit doesn't work if the target contains explicit undef
-#     tvars = [v for v in subterms(self.tgt) if isinstance(v, Instruction)]
-#     tvars = tvars[1:]
-#     tvars.extend(vars)
-#     vars = tvars
-
-    # calling eval on all the subterms of self.src is O(n^2), but
-    # we only do this for error messages and n is typically small
-    # so it probably doesn't matter
     ty_width = 1
     name_width = 1
     rows = []
     for v in vars:
       ty = str(self.types[typing.context[v]])
-      name = v.name
-      interp = smt(v)
-      if z3.is_false(self.model.evaluate(mk_and(interp.nonpoison))):
-        # better to check for is_true? can this ever be unevaluated?
-        rows.append((ty, name, 'poison'))
-      else:
-        rows.append(
-          (ty, name, format_z3val(self.model.evaluate(smt.eval(v), True))))
-        # it shouldn't matter that these will get new qvars,
-        # because those will just get defaulted anyway
-      if len(ty) > ty_width: ty_width = len(ty)
-      if len(name) > name_width: name_width = len(name)
+      ty_width = max(ty_width, len(ty))
 
-    print 'Example:'
-    for ty,name,val in rows:
-      print '{0:>{1}} {2:{3}} = {4}'.format(ty,ty_width,name,name_width,val)
+      name = v.name
+      name_width = max(name_width, len(name))
+
+      interp = smt(v)
+
+      if z3.is_false(self.model.evaluate(mk_and(interp.nonpoison))):
+        # FIXME: make sure interp.nonpoison fully evaluates
+        # e.g., what if it depends on a qvar somehow?
+        rows.append((ty, name, 'poison'))
+
+      else:
+        val = self.model.evaluate(smt.eval(v), model_completion=True)
+        # this will pick arbitrary values for any source qvars or
+        # other unconstrained values
+
+        rows.append((ty, name, format_z3val(val)))
 
     interp = smt(self.src)
     if z3.is_false(self.model.evaluate(mk_and(interp.nonpoison))):
-      print 'source: poison'
+      srcval = 'poison'
     else:
-      src_v = self.model.evaluate(self.srcv, True)
-      print 'source:', format_z3val(src_v)
+      srcval = format_z3val(self.model.evaluate(self.srcv, True))
 
     if self.cause == UB:
-      print 'target: undefined'
+      tgtval = 'undefined'
     elif self.cause == POISON:
-      print 'target: poison'
+      tgtval = 'poison'
     else:
-      tgt_v = self.model.evaluate(self.tgtv, True)
-      print 'target:', format_z3val(tgt_v)
+      tgtval = format_z3val(self.model.evaluate(self.tgtv, True))
+
+    return '''{cause} for {srcty} {src}
+
+Example:
+{table}
+source: {srcval}
+target: {tgtval}'''.format(
+      cause = self.cause_str[self.cause],
+      srcty = self.types[typing.context[self.src]],
+      src = self.src.name,
+      table = '\n'.join(
+        '{0:>{1}} {2:{3}} = {4}'.format(ty, ty_width, name, name_width, val)
+        for ty, name, val in rows),
+      srcval = srcval,
+      tgtval = tgtval,
+    )

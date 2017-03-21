@@ -1,6 +1,7 @@
 import collections, sys
+from . import error
 from . import language as L
-from .transform import Transform, Formatter
+from .transform import Transform
 from pyparsing.pyparsing import *
 
 ParserElement.enablePackrat()
@@ -616,136 +617,57 @@ transforms = Optional(EOL) + ZeroOrMore(transform)
 transforms.ignore(comment)
 transforms.ignore(continuation)
 
-str1 = """
-Name: Test1
-Pre: width(%a) == -C
+class Error(error.Error):
+  pass
 
-%a = mul %x, C
-%r = add %a, %x
-=>
-%r = mul %x, C+1
-"""
+class ParseError(Error):
+  def __init__(self, error, source=None):
+    self.error = error
+    self.source = source
 
-str2 = '''Name: InstCombineShift: 366-1
-%TrOp = shl %X, C1
-%Op0 = trunc %TrOp
-%r = shl i17 %Op0, C2
-  =>
-%s1 = shl %TrOp, zext(C2)
-%and = and %s1, ((1<<width(C2))-1) << zext(C2)
-%r = trunc %and
-'''
+  def __str__(self):
+    fmt = '{0.msg}\n(line {0.lineno}, col {0.col} in {1}){2}' if self.source \
+      else '{0.msg}\n(line {0.lineno}, col {0.col}){2}'
 
-str3 = '''Name: test
-Assume: C1 != 0
-Feature: C1 ^ C2 == 0
-Feature: isPowerOf2(C1)
-Pre: C2 != 0
-%x = add %a, C1
-%y = add %x, C2
-=>
-%y = add %a, (C1+C2)
-'''
+    guide = '\n{0.line}\n{1:>{2}}'.format(self.error, '^', self.error.col) \
+      if self.error.pstr else ''
 
-str4 = '''%x = add %a, %b
-=>
-%x = add %a, %b
-'''
-
-# comma.setDebug()
-# cfunc.setDebug()
-# arg.setDebug()
-# reg.setDebug()
-# ty.setDebug()
-# opt_ty.setDebug()
-# cexpr.setDebug()
-# pre.setDebug()
-# pre_atom.setDebug()
-# pre_pred.setDebug()
-# pre_comp.setDebug()
-# pre_lit.setDebug()
-# binOp.setDebug()
-# convOp.setDebug()
-# select.setDebug()
-# alloca.setDebug()
-# op.setDebug(True)
-# instr.setDebug()
-# instrs.setDebug()
-# cexpr.setDebug()
-# reg.setDebug()
-# operand.setDebug()
-# transform.setDebug()
-
-def test(s = '%a = add i8 %b, %c', t = None):
-  try:
-    op = instr.parseString(s)[0]
-    src = collections.OrderedDict()
-    op.eval(src, Phase.Source)
-
-    if t:
-      top = instr.parseString(t)[0]
-      tgt = collections.OrderedDict([(k,v) for k,v in src.iteritems() if isinstance(v,Input)])
-
-      #for x in src:
-      # if isinstance(src[x], Input):
-      #   tgt[x] = src[x]
-      top.eval(tgt, Phase.Target)
-    else: tgt = {}
-    return src, tgt
-  except ParseBaseException, e:
-    print e.msg, '(line %d, col %d)' % (e.lineno, e.col)
-    if e.pstr:
-      print e.line
-      print ' ' * (e.col-1) + '^'
+    return fmt.format(self.error, self.source, guide)
 
 def parse_transform(s, extended_results=False):
   try:
     return transform.parseString(s, True)[0].eval(extended_results)
-  except ParseBaseException, e:
-    print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
-    if e.pstr:
-      print e.line
-      print ' ' * (e.col-1) + '^'
-    raise
+  except ParseBaseException as e:
+    raise ParseError(e)
 
-def parse_opt_file(s, extended_results=False):
-  'Wrapper for transforms.parseString which exits program on exceptions.'
-  try:
-    return [t.eval(extended_results)
-            for t in transforms.parseString(s, True)]
-  except ParseBaseException, e:
-    print 'ERROR:', e.msg, '(line %d, col %d)' % (e.lineno, e.col)
-    if e.pstr:
-      print e.line
-      print ' ' * (e.col-1) + '^'
-    exit(-1)
+def parse_opt_file(f, extended_results=False):
+  'Wrapper for transforms.parseString which throws ParseError.'
 
-def read_opt_files(files, extended_results=False):
-  for f in files:
+  if isinstance(f, str):
+    s = f
+    source = None
+
+  elif isinstance(f, file):
     if f.isatty():
       sys.stderr.write('[Reading from terminal...]\n')
 
-    for opt in parse_opt_file(f.read(), extended_results):
-      yield opt
+    s = f.read()
+    source = f.name
 
+  else:
+    raise ValueError('Expected string or file')
 
-def parse_opts(s):
-  # transforms.setDebug()
   try:
-    for t in transforms.parseString(s, True):
-      print '---------'
-      print t.format()
-      print
+    return [t.eval(extended_results)
+            for t in transforms.parseString(s, True)]
+  except ParseBaseException as e:
+    raise ParseError(e, source)
 
-  except ParseBaseException, e:
-    print e.msg, '(line %d, col %d)' % (e.lineno, e.col)
-    if e.pstr:
-      print e.line
-      print ' ' * (e.col-1) + '^'
+def read_opt_files(files, extended_results=False):
+  import itertools
+  return itertools.chain.from_iterable(
+    parse_opt_file(f, extended_results) for f in files)
+
 
 if __name__ == "__main__":
-  opts = parse_opts(sys.stdin.read())
-#   import logging
-#   logging.basicConfig()
-#   logging.getLogger('transform').setLevel(logging.DEBUG)
-#   parse_opts(str2)
+  opts = parse_opt_file(sys.stdin)

@@ -3,6 +3,7 @@ from .. import language as L
 from .. import typing
 from .. import smtinterp
 from .. import config
+from .. import error
 from ..formatter import Formatted, format_parts
 from ..util.pretty import pformat
 from ..z3util import mk_and, mk_or, mk_not, mk_forall
@@ -1306,7 +1307,7 @@ def infer_precondition(opt,
 
 # ----
 
-class Failure(Exception):
+class Failure(error.Error):
   pass
 
 import sys, os
@@ -1561,6 +1562,9 @@ def main(
   except KeyboardInterrupt:
     sys.stderr.write('\n[Keyboard interrupt]\n')
     exit(130)
+  except error.Error as e:
+    print 'ERROR:', e
+    exit(1)
   except Exception as e:
     logging.exception('Uncaught exception: %s', e)
     sys.stderr.write('\nERROR: {}\n'.format(e))

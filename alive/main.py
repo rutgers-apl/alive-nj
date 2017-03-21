@@ -6,6 +6,7 @@ import os.path
 import itertools
 import z3
 from . import config
+from . import error
 from . import typing
 from . import refinement
 from . import smtinterp
@@ -74,19 +75,15 @@ class StatusReporter(object):
     self.clear()
     if self.quiet:
       print '----------'
-      print self.opt.format()
+      self.opt.format().write_to(sys.stdout, width=self.width)
       print
 
-    if isinstance(error, refinement.Error):
-      error.write()
-    else:
-      print 'ERROR:', error
-
+    print 'ERROR:', error
     print
 
     if not self.persist:
       self.final_status()
-      exit(-1)
+      exit(1)
 
   def clear(self):
     if self.stdstatus:
@@ -201,6 +198,9 @@ def main():
   try:
     verify_opts(read_opt_files(args.file), args.quiet, args.persist,
       args.translator)
+  except error.Error as e:
+    print 'ERROR:', e
+    exit(1)
   except KeyboardInterrupt:
     sys.stderr.write('\n[Keyboard interrupt]\n')
     exit(130)

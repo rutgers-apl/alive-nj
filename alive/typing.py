@@ -3,6 +3,7 @@ Apply typing constraints to the IR.
 '''
 
 from . import config
+from . import error
 from .language import *
 from .util import disjoint, pretty
 from .formatter import Formatter
@@ -731,5 +732,5 @@ class Validator(object):
     if self.type_model.bits(self.type(a)) != self.type_model.bits(self.type(b)):
       raise Error
 
-class Error(Exception):
+class Error(error.Error):
   pass
