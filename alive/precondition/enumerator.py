@@ -306,10 +306,10 @@ def sized_preconditions(config, size):
 
   def disjunctions(size):
     for t in assocs(size, combine, 2, neg_subexprs=predicates):
-      yield L.OrPred(*_flatten(t))
+      yield L.OrPred(_flatten(t))
 
   for t in assocs(size,combine, 2, subexprs=disjunctions, neg_subexprs=predicates):
-    yield L.AndPred(*_flatten(t))
+    yield L.AndPred(_flatten(t))
 
   for t in disjunctions(size):
     yield t

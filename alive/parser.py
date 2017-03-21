@@ -186,7 +186,7 @@ class CmpAst(PreconditionAst):
     if len(conds) == 1:
       return conds[0]
     else:
-      return L.AndPred(*conds)
+      return L.AndPred(conds)
 
 class NotAst(PreconditionAst):
   def condition(self, ids):
@@ -194,11 +194,11 @@ class NotAst(PreconditionAst):
 
 class AndAst(PreconditionAst):
   def condition(self, ids):
-    return L.AndPred(*(p.condition(ids) for p in self.toks[0]))
+    return L.AndPred(p.condition(ids) for p in self.toks[0])
 
 class OrAst(PreconditionAst):
   def condition(self, ids):
-    return L.OrPred(*(p.condition(ids) for p in self.toks[0]))
+    return L.OrPred(p.condition(ids) for p in self.toks[0])
 
 
 

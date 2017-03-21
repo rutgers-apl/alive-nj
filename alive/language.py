@@ -807,8 +807,16 @@ class Predicate(Node):
 class AndPred(Predicate):
   __slots__ = ('clauses',)
 
-  def __init__(self, *clauses):
-    self.clauses = clauses
+  @classmethod
+  def of(cls, clauses):
+    clauses = tuple(clauses)
+    if len(clauses) == 1:
+      return clauses[0]
+
+    return cls(clauses)
+
+  def __init__(self, clauses):
+    self.clauses = tuple(clauses)
 
   def pretty(self):
     return pretty.pfun('AndPred', self.clauses)
@@ -819,13 +827,21 @@ class AndPred(Predicate):
   def type_constraints(self, tcs):
     return
 
-TruePred = AndPred()
+TruePred = AndPred(())
 
 class OrPred(Predicate):
   __slots__ = ('clauses',)
 
-  def __init__(self, *clauses):
-    self.clauses = clauses
+  @classmethod
+  def of(cls, clauses):
+    clauses = tuple(clauses)
+    if len(clauses) == 1:
+      return clauses[0]
+
+    return cls(clauses)
+
+  def __init__(self, clauses):
+    self.clauses = tuple(clauses)
 
   def pretty(self):
     return pretty.pfun('OrPred', self.clauses)

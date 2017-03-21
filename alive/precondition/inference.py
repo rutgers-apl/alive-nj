@@ -579,20 +579,6 @@ def reject_negative_vectors(vectors):
   yield cover
 
 
-def mk_AndPred(clauses):
-  clauses = tuple(clauses)
-  if len(clauses) == 1:
-    return clauses[0]
-
-  return L.AndPred(*clauses)
-
-def mk_OrPred(clauses):
-  clauses = tuple(clauses)
-  if len(clauses) == 1:
-    return clauses[0]
-
-  return L.OrPred(*clauses)
-
 negate_pred = enumerator.negate_pred
 
 
@@ -649,7 +635,7 @@ def make_precondition(clauses, features):
 
     return features[l.feature]
 
-  return mk_AndPred(mk_OrPred(lit(l) for l in c) for c in clauses)
+  return L.AndPred.of(L.OrPred.of(lit(l) for l in c) for c in clauses)
 
 def calculate_coverage(clauses, feature_vectors):
   return sum(len(v[1]) for v in feature_vectors if not v[2] and
@@ -1166,7 +1152,7 @@ def ensure_safety(pre, assumptions, config, symbols, positives, negatives,
   unsafe = [e for e in negatives if test_feature(pre, e, cache) == UNSAFE]
   if not unsafe:
     unsafe, _ = check_safety(
-      assumptions, pre, L.AndPred(), config.model, symbols, solver_unsafe)
+      assumptions, pre, L.TruePred, config.model, symbols, solver_unsafe)
 
   log.info('Unsafe examples: %s', len(unsafe))
 
@@ -1184,7 +1170,7 @@ def ensure_safety(pre, assumptions, config, symbols, positives, negatives,
       assumptions, pre, prepre, config.model, symbols, solver_unsafe)
 
     if not unsafe_examples and not safe_examples:
-      return L.AndPred(prepre, pre)
+      return L.AndPred([prepre, pre])
 
     positives += safe_examples
     unsafe    += unsafe_examples
@@ -1262,7 +1248,7 @@ def infer_precondition(opt,
   # FIXME: remove or formalize test of given precondition
   if opt.pre:
     cache = {}
-    pre = L.AndPred(*opt.pre)
+    pre = L.AndPred.of(opt.pre)
     prepos = sum(1 for e in goods if test_feature(pre, e, cache) == ACCEPT)
     preneg = sum(1 for e in bads if test_feature(pre, e, cache) != ACCEPT)
     msg = 'Accepts {}/{} positive; rejects {}/{} negative'.format(
