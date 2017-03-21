@@ -165,3 +165,8 @@ For example, to make `--pre-features` set by default, use:
 
     main(pre_features = True)
 
+### Limitations
+
+Alive-Infer does not infer predicates involving dataflow analysis, such as
+`WillNotOverflowSignedAdd` or `MaskedValueIsZero`, or type casts, such as
+`zext` and `trunc`. Alive-Infer does not currently support floating-point.
