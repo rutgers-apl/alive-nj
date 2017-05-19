@@ -79,6 +79,7 @@ class StatusReporter(object):
       print
 
     print 'ERROR:', error
+    sys.stdout.flush()
     print
 
     if not self.persist:
