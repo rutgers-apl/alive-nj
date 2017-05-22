@@ -20,7 +20,7 @@ PRESAFE, TGTSAFE, UB, POISON, UNEQUAL = range(5)
 def check(opt, type_model, translator=config.translator):
   logger.info('Checking refinement of %r', opt.name)
 
-  translator = smtinterp.SMTTranslator.registry[translator]
+  translator = smtinterp.lookup(translator)
   smt = translator(type_model)
 
   asm = smt.conjunction(opt.asm)

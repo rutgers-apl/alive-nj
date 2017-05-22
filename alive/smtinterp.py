@@ -6,6 +6,7 @@ from .language import *
 from .z3util import *
 from .util.dispatch import doubledispatch
 from . import typing
+from . import error
 from functools import partial
 import z3, operator, logging
 import types
@@ -359,6 +360,29 @@ class BaseSMTTranslator():
     self.attrs[term][attr] = b
     return b
 
+
+def lookup(encoder):
+  """Return an SMT encoder with this name (case-insensitive).
+
+  If passed a subclass of BaseSMTTranslator, return it unchanged.
+  """
+  logger.debug('Looking up encoder %s', encoder)
+
+  if isinstance(encoder, str):
+    try:
+      return BaseSMTTranslator.registry[encoder.lower()]
+    except KeyError:
+      raise error.Error('Unknown SMT encoder: ' + encoder)
+
+  if isinstance(encoder, type) and issubclass(encoder, BaseSMTTranslator):
+    return encoder
+
+  raise ValueError('Argument to lookup must be string or class')
+
+def encoders():
+  """Return an iterator of name,class pairs for all known encoders.
+  """
+  return BaseSMTTranslator.registry.iteritems()
 
 # generic function Eval
 # =====================

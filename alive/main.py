@@ -189,10 +189,6 @@ def main():
       print 'ERROR: Benchmark directory', config.bench_dir, 'does not exist'
       exit(1)
 
-  if args.translator not in smtinterp.SMTTranslator.registry:
-    print 'ERROR: Unknown translator:', args.translator
-    exit(1)
-
   if args.rounding_mode:
     z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 

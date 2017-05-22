@@ -1411,15 +1411,12 @@ cs_strategies = {
   'minneg': find_least_negative_conflict_set,
 }
 
-Translator = smtinterp.BaseSMTTranslator.registry[config.translator]
+Translator = smtinterp.lookup(config.translator)
 
 def set_translator(translator):
   global Translator
 
-  if isinstance(translator, str):
-    translator = smtinterp.BaseSMTTranslator.registry[translator]
-
-  Translator = translator
+  Translator = smtinterp.lookup(translator)
 
 
 def main(
