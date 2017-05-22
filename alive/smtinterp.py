@@ -483,7 +483,7 @@ eval.register(FSubInst, BaseSMTTranslator, fbinop(operator.sub))
 eval.register(FMulInst, BaseSMTTranslator, fbinop(operator.mul))
 eval.register(FDivInst, BaseSMTTranslator, fbinop(
   lambda x,y: z3.fpDiv(z3.get_default_rounding_mode(), x, y)))
-eval.register(FRemInst, BaseSMTTranslator, fbinop(z3.fpRem))
+eval.register(FRemInst, BaseSMTTranslator, fbinop(fpMod))
 
 
 @doubledispatch

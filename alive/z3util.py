@@ -3,7 +3,7 @@ Extra functions for dealing with Z3 BitVecs.
 '''
 
 __all__ = ('mk_and', 'mk_or', 'mk_not', 'mk_forall', 'bool_to_BitVec',
-           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits', 'fpUEQ',
+           'bv_log2', 'ctlz', 'cttz', 'ComputeNumSignBits', 'fpUEQ', 'fpMod',
            'zext_or_trunc')
 
 import z3
@@ -100,3 +100,35 @@ def ComputeNumSignBits(bitwidth, v):
 
 def fpUEQ(x, y):
   return z3.Or(z3.fpEQ(x,y), z3.fpIsNaN(x), z3.fpIsNaN(y))
+
+
+# Z3 4.4 incorrectly implemented fpRem as fpMod, where fpMod(x,y) has the same
+# sign as x. In particular fpMod(3,2) = 1, but fpRem(3,2) = -1.
+def detect_fpMod():
+  """Determine whether Z3's fpRem is correct, and set fpMod accordingly.
+  """
+  global fpMod
+  import logging
+  log = logging.getLogger(__name__)
+  log.debug('Setting fpMod')
+
+  if z3.is_true(z3.simplify(z3.FPVal(3, z3.Float32()) % 2 < 0)):
+    log.debug('Correct fpRem detected')
+    fpMod = fpMod_using_fpRem
+  else:
+    log.debug('fpRem = fpMod')
+    fpMod = z3.fpRem
+
+
+# Wait until fpMod is called, then determine which implementation it should
+# have. Subsequent calls will use that implementation directly.
+def fpMod(x, y):
+  detect_fpMod()
+  return fpMod(x, y)
+
+# It would be great if this had a less complicated implementation
+def fpMod_using_fpRem(x, y):
+  y = z3.fpAbs(y)
+  z = z3.fpRem(z3.fpAbs(x), y)
+  r = z3.If(z3.fpIsNegative(z), z + y, z)   # does rounding mode matter here?
+  return z3.If(z3.Not(z3.fpIsNegative(x) == z3.fpIsNegative(r)), z3.fpNeg(r), r)
