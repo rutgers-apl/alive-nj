@@ -151,26 +151,36 @@ def verify_opts(opts, quiet=config.quiet, persist=config.persist,
 
   status_reporter.final_status()
 
-def main():
+def main(
+    persist         = config.persist,
+    quiet           = config.quiet,
+    translator      = config.translator,
+    rounding_mode   = None,
+    bench_dir       = None,
+    bench_threshold = None,
+  ):
   logging.config.dictConfig(config.logs)
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--persist', action='store_true',
-    default=config.persist,
+    default=persist,
     help='continue processing opts after verification failures')
   parser.add_argument('--quiet', action='store_true',
-    default=config.quiet,
+    default=quiet,
     help='only print number of tested and unverified opts')
   parser.add_argument('--translator', action='store',
-    default=config.translator,
+    default=translator,
     # choices=smtinterp.SMTTranslator.registry,
     help='(advanced) pick class for SMT translation')
   parser.add_argument('-r', '--rounding-mode', action='store',
     choices=rounding_modes,
+    default=rounding_mode,
     help='rounding mode for arithmetic')
   parser.add_argument('--bench-dir', action='store',
+    default=bench_dir,
     help='generate SMT2 benchmarks in this directory')
   parser.add_argument('--bench-threshold', action='store', type=float,
+    default=bench_threshold,
     help='minimum solve time (s) needed to trigger benchmark generation')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
