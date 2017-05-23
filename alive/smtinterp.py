@@ -50,8 +50,20 @@ class MetaEncoder(type):
     if not hasattr(cls, 'registry'):
       cls.registry = {}
 
-    cls.registry[name.lower()] = cls
-    return super(MetaTranslator, cls).__init__(name, bases, dict)
+    if not (name.startswith('Base') or name.endswith('Mixin')):
+      reg_name = name
+      if cls.__module__ != __name__ and cls.__module__ != '__main__':
+        reg_name = cls.__module__ + '.' + name
+
+      reg_name = reg_name.lower()
+
+      if reg_name in cls.registry:
+        raise ValueError('Duplicate encoder key: {0}\n{1}\n{2}'.format(
+          reg_name, cls, cls.registry[reg_name]))
+
+      cls.registry[reg_name] = cls
+
+    return super(MetaEncoder, cls).__init__(name, bases, dict)
 
 class BaseSMTEncoder():
   __metaclass__ = MetaEncoder
