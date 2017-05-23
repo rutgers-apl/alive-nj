@@ -130,8 +130,11 @@ rounding_modes = {
   'rtn': z3.RTN,
 }
 
-def verify_opts(opts, quiet=config.quiet, persist=config.persist,
-    translator=config.translator):
+def verify_opts(opts,
+    quiet    = config.quiet,
+    persist  = config.persist,
+    encoding = config.encoding
+  ):
   """Check refinement of each opt in iterable."""
 
   status_reporter = StatusReporter(quiet, persist)
@@ -141,7 +144,7 @@ def verify_opts(opts, quiet=config.quiet, persist=config.persist,
       status_reporter.begin_opt(opt)
 
       for m in opt.type_models():
-        refinement.check(opt, m, translator)
+        refinement.check(opt, m, encoding)
         status_reporter.add_proof()
 
       status_reporter.end_opt()
@@ -154,7 +157,7 @@ def verify_opts(opts, quiet=config.quiet, persist=config.persist,
 def main(
     persist         = config.persist,
     quiet           = config.quiet,
-    translator      = config.translator,
+    encoding        = config.encoding,
     rounding_mode   = None,
     bench_dir       = None,
     bench_threshold = None,
@@ -168,10 +171,11 @@ def main(
   parser.add_argument('--quiet', action='store_true',
     default=quiet,
     help='only print number of tested and unverified opts')
-  parser.add_argument('--translator', action='store',
-    default=translator,
-    # choices=smtinterp.SMTTranslator.registry,
-    help='(advanced) pick class for SMT translation')
+  parser.add_argument('-e', '--encoding', '--translator', action='store',
+    default=encoding,
+    help='specify SMT encoding for verification')
+  parser.add_argument('-E', '--list-encodings', action='store_true',
+    help='list available SMT encodings')
   parser.add_argument('-r', '--rounding-mode', action='store',
     choices=rounding_modes,
     default=rounding_mode,
@@ -188,6 +192,11 @@ def main(
 
   args = parser.parse_args()
 
+  if args.list_encodings:
+    for name,cls in smtinterp.encoders():
+      print name
+    exit(0)
+
   if args.bench_dir:
     config.bench_dir = args.bench_dir
 
@@ -203,8 +212,11 @@ def main(
     z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 
   try:
-    verify_opts(read_opt_files(args.file), args.quiet, args.persist,
-      args.translator)
+    verify_opts(read_opt_files(args.file),
+      quiet    = args.quiet,
+      persist  = args.persist,
+      encoding = args.encoding,
+    )
   except error.Error as e:
     print 'ERROR:', e
     exit(1)

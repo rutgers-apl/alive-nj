@@ -35,7 +35,7 @@ def test_feature(pred, test_case, cache):
   try:
     pred_smt = cache[test_case.type_vector]
   except KeyError:
-    smt = Translator(test_case.type_vector)
+    smt = Encoder(test_case.type_vector)
     pre = smt(pred)
     assert not (pre.defined or pre.nonpoison or pre.aux or pre.qvars)
     pred_smt = (pre.safe, pre.value)
@@ -799,8 +799,8 @@ def get_models(expr, vars):
     logger.error('get_models got unknown: %s\n%s', s.reason_unknown(), s)
     raise Failure('Solver returned unknown: ' + s.reason_unknown())
 
-def interpret_opt(translator, opt, assumptions=(), strengthen=False):
-  """Translate body of opt using SMT translator.
+def interpret_opt(encoding, opt, assumptions=(), strengthen=False):
+  """Translate body of opt using SMT encoding.
 
   Returns (premise, body, filter), where premise is a statment which must
   always be true, body is true when the optimization is valid, and filter
@@ -817,18 +817,18 @@ def interpret_opt(translator, opt, assumptions=(), strengthen=False):
   # Care must be taken to keep this and alive.refinement compatible.
 
   # initial premise: assumptions are safe and satisfied
-  smt = translator.conjunction(assumptions)
+  smt = encoding.conjunction(assumptions)
   assert not smt.defined and not smt.nonpoison and not smt.qvars
   premise = smt.aux + smt.safe + smt.value
 
-  src = translator(opt.src)
+  src = encoding(opt.src)
 
   assert not src.aux and not src.safe
   if src.qvars:
     raise Failure("Quantified variables in opt {!r}".format(opt.name))
     # FIXME: This indicates an inappropriate input, not a bug
 
-  tgt = translator(opt.tgt)
+  tgt = encoding(opt.tgt)
 
   premise += tgt.aux
   filter = src.defined + src.nonpoison
@@ -844,7 +844,7 @@ def interpret_opt(translator, opt, assumptions=(), strengthen=False):
     body += mk_implies(filter, tgt.nonpoison + [src.value == tgt.value])
 
   if strengthen:
-    pre = translator.conjunction(opt.pre)
+    pre = encoding.conjunction(opt.pre)
     assert not pre.defined and not pre.nonpoison and not pre.qvars
     premise += pre.aux
     premise += pre.safe
@@ -898,7 +898,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
   for type_vector in type_vectors:
     log.debug('Making cases for %s', type_vector)
 
-    smt = Translator(type_vector)
+    smt = Encoder(type_vector)
 
     symbol_smts = [smt.eval(t) for t in symbols]
 
@@ -992,7 +992,7 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
 
   for type_vector in opt.type_models():
     reporter.test_precondition()
-    smt = Translator(type_vector)
+    smt = Encoder(type_vector)
 
     premise, body, _ = interpret_opt(smt, opt, assumptions)
 
@@ -1032,7 +1032,7 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
   for type_vector in opt.type_models():
     log.debug('checking types %s', type_vector)
     reporter.test_precondition() # make more specific?
-    smt = Translator(type_vector)
+    smt = Encoder(type_vector)
 
     premise, body, filter = interpret_opt(smt, opt, assumptions)
     input_smts = [smt.eval(t) for t in inputs]
@@ -1080,7 +1080,7 @@ def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
   for type_vector in type_model.type_vectors():
     log.debug('Checking types %s', type_vector)
     reporter.test_precondition()
-    smt = Translator(type_vector)
+    smt = Encoder(type_vector)
 
     P  = smt(pre)
     assert not P.qvars and not P.defined and not P.nonpoison
@@ -1411,12 +1411,12 @@ cs_strategies = {
   'minneg': find_least_negative_conflict_set,
 }
 
-Translator = smtinterp.lookup(config.translator)
+Encoder = smtinterp.lookup(config.encoding)
 
-def set_translator(translator):
-  global Translator
+def set_encoding(encoding):
+  global Encoder
 
-  Translator = smtinterp.lookup(translator)
+  Encoder = smtinterp.lookup(encoding)
 
 
 def main(
@@ -1430,7 +1430,7 @@ def main(
     use_features = True,
     echo = True,
     strategy = 'largest',
-    translator = config.translator,
+    encoding = config.encoding,
     random_examples = 500,
     solver_positives = 10,
     solver_negatives = 10,
@@ -1484,8 +1484,8 @@ def main(
     default=strategy,
     choices=cs_strategies,
     help='Method for choosing conflict set')
-  parser.add_argument('--translator', action='store',
-    default=translator,
+  parser.add_argument('--encoding', action='store',
+    default=encoding,
     help='Specify variant of Alive/LLVM semantics')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin])
@@ -1493,7 +1493,7 @@ def main(
   args = parser.parse_args()
 
   try:
-    set_translator(args.translator)
+    set_encoding(args.encoding)
 
     for opt,features in read_opt_files(args.file, extended_results=True):
       print '; -----'

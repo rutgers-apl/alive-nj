@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 PRESAFE, TGTSAFE, UB, POISON, UNEQUAL = range(5)
 
-def check(opt, type_model, translator=config.translator):
+def check(opt, type_model, encoding=config.encoding):
   logger.info('Checking refinement of %r', opt.name)
 
-  translator = smtinterp.lookup(translator)
-  smt = translator(type_model)
+  encoding = smtinterp.lookup(encoding)
+  smt = encoding(type_model)
 
   asm = smt.conjunction(opt.asm)
   assert not asm.defined and not asm.nonpoison and not asm.qvars
@@ -42,7 +42,7 @@ def check(opt, type_model, translator=config.translator):
 
   def err(c, m):
     return CounterExampleError(
-      c, m, type_model, opt.src, src.value, tgt.value, translator)
+      c, m, type_model, opt.src, src.value, tgt.value, encoding)
 
   if pre.safe:
     check_expr(PRESAFE, mk_and(premise + [mk_not(pre.safe)]), opt, err)
