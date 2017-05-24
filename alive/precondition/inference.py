@@ -829,6 +829,9 @@ def interpret_opt(encoding, opt, assumptions=(), strengthen=False):
     # FIXME: This indicates an inappropriate input, not a bug
 
   tgt = encoding(opt.tgt)
+  if tgt.qvars:
+    raise Failure("Quantified variables in opt {!r}".format(opt.name))
+    # FIXME: These should be added to the list of input vars
 
   premise += tgt.aux
   filter = src.defined + src.nonpoison
@@ -884,6 +887,18 @@ def full_model(symbol_values):
 
   return all(v is not None for s,v in symbol_values)
 
+def eval_inputs(smt, inputs):
+  """Translate a list of Alive inputs to SMT variables.
+  """
+  vars = []
+  for i in inputs:
+    assert isinstance(i, L.Input)
+    v = smt(i)
+    vars.append(v.value)
+    vars += v.nonpoison
+
+  return vars
+
 def make_test_cases(opt, symbols, inputs, type_vectors,
     num_random, num_good, num_bad, assumptions=(), strengthen=False):
   log = logger.getChild('make_test_cases')
@@ -922,7 +937,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
 
     if num_good > 0:
-      input_smts = [smt.eval(t) for t in inputs]
+      input_smts = eval_inputs(smt, inputs)
 
       # premise inside quantifier because it may contain tgt.aux
       query = mk_and(filter + [mk_forall(input_smts, premise + body)])
@@ -1035,7 +1050,7 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
     smt = Encoder(type_vector)
 
     premise, body, filter = interpret_opt(smt, opt, assumptions)
-    input_smts = [smt.eval(t) for t in inputs]
+    input_smts = eval_inputs(smt, inputs)
 
     pre_smt = smt(pre)
     assert not pre_smt.defined and not pre_smt.nonpoison and not pre_smt.qvars

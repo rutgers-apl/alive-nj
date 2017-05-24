@@ -419,8 +419,16 @@ def _(term, smt):
 @eval.register(Input, BaseSMTEncoder)
 def _(term, smt):
   ty = smt.type(term)
+  smt.add_nonpoison(z3.Bool('np_' + term.name))
   return z3.Const(term.name, _ty_sort(ty))
 
+@eval.register(Symbol, BaseSMTEncoder)
+def _(term, smt):
+  ty = smt.type(term)
+  return z3.Const(term.name, _ty_sort(ty))
+
+# TODO: since none of the clients use defined (aside from PLDI2015), maybe
+# better to move it out
 def binop(op, defined=None, poisons=None):
   return lambda term, smt: smt._binary_operator(term, op, defined, poisons)
 
@@ -447,40 +455,97 @@ eval.register(MulInst, BaseSMTEncoder,
                   == z3.ZeroExt(x.size(),x*y)
     }))
 
-eval.register(SDivInst, BaseSMTEncoder,
-  binop(operator.div,
-    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)],
-    poisons = {'exact': lambda x,y: (x/y)*y == x}))
+@eval.register(SDivInst, BaseSMTEncoder)
+def _(term, smt):
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.x)
 
-eval.register(UDivInst, BaseSMTEncoder,
-  binop(z3.UDiv,
-    defined = lambda x,y: [y != 0],
-    poisons = {'exact': lambda x,y: z3.UDiv(x,y)*y == x}))
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
 
-eval.register(SRemInst, BaseSMTEncoder,
-  binop(z3.SRem,
-    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)]))
+  smt.add_nonpoison(*nx)
 
-eval.register(URemInst, BaseSMTEncoder,
-  binop(z3.URem,
-    defined = lambda x,y: [y != 0]))
+  smt.add_defs(y != 0, *ny)
+  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison((x/y)*y == x)
+
+  return x/y
+
+@eval.register(UDivInst, BaseSMTEncoder)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(y != 0, *ny)
+
+  if 'exact' in term.flags:
+    smt.add_nonpoison(z3.UDiv(x,y)*y == x)
+
+  return z3.UDiv(x,y)
+
+@eval.register(SRemInst, BaseSMTEncoder)
+def _(term, smt):
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_nonpoison(*nx)
+
+  smt.add_defs(y != 0, *ny)
+  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
+
+  return z3.SRem(x,y)
+
+@eval.register(URemInst, BaseSMTEncoder)
+def _(term, smt):
+  x = smt.eval(term.x)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.y)
+
+  smt.add_defs(y != 0, *ny)
+
+  return z3.URem(x,y)
+
+def shift_op(op, poisons):
+  def _(term, smt):
+    x = smt.eval(term.x)
+    y = smt.eval(term.y)
+    z = smt._conditional_value([z3.ULT(y, y.size())], op(x,y), term.name)
+
+    for f in poisons:
+      if f in smt.attrs[term]:
+        smt.add_nonpoison(z3.Implies(self.attrs[term][f], poisons[f](x,y,z)))
+      elif f in term.flags:
+        smt.add_nonpoison(poisons[f](x,y,z))
+
+    cond = [z3.ULT(y, y.size())]
+    return smt._conditional_value(cond, op(x,y), term.name)
+
+  return _
 
 eval.register(ShlInst, BaseSMTEncoder,
-  binop(operator.lshift,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
+  shift_op(operator.lshift,
     poisons = {
-      'nsw': lambda x,y: (x << y) >> y == x,
-      'nuw': lambda x,y: z3.LShR(x << y, y) == x}))
+      'nsw': lambda x,y,z: z >> y == x,
+      'nuw': lambda x,y,z: z3.LShR(z, y) == x}))
+
 
 eval.register(AShrInst, BaseSMTEncoder,
-  binop(operator.rshift,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
-    poisons = {'exact': lambda x,y: (x >> y) << y == x}))
+  shift_op(operator.rshift,
+    poisons = {'exact': lambda x,y,z: z << y == x}))
+
 
 eval.register(LShrInst, BaseSMTEncoder,
-  binop(z3.LShR,
-    defined = lambda x,y: [z3.ULT(y, y.size())],
-    poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x}))
+  shift_op(z3.LShR,
+    poisons = {'exact': lambda x,y,z: z << y == x}))
+
 
 eval.register(AndInst, BaseSMTEncoder, binop(operator.and_))
 eval.register(OrInst, BaseSMTEncoder, binop(operator.or_))
@@ -1081,20 +1146,91 @@ class SMTUndef(BaseSMTEncoder):
 
     u = z3.Const(name, v.sort())
     self.add_qvar(u)
-    return z3.If(z3.And(conds), v, u)
+    return z3.If(mk_and(conds), v, u)
 
   _conditional_conv_value = _conditional_value
 
 
-class BaseBranchSelect(BaseSMTEncoder):
-  """Interpret select like a branch, only passing poison from the selected
-  argument.
 
-  Introduces poison for inputs.
+class UBCPSelectMixin(BaseSMTEncoder):
+  """Undefined behavior for poisoned choice, conditional poison
   """
   pass
 
-@eval.register(SelectInst, BaseBranchSelect)
+@eval.register(SelectInst, UBCPSelectMixin)
+def _(term, smt):
+  with smt.local_nonpoison() as nc:
+    c = smt.eval(term.sel)
+
+  smt.add_defs(*nc)
+
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.arg1)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.arg2)
+
+  if nx or ny:
+    smt.add_nonpoison(z3.If(c == 1, mk_and(nx), mk_and(ny)))
+
+  return z3.If(c == 1, x, y)
+
+class UBCPSelect(UBCPSelectMixin, SMTUndef):
+  pass
+
+class UBSelectMixin(BaseSMTEncoder):
+  """Undefined behavior for poisoned choice, poion if either choice is poison
+  """
+  pass
+
+@eval.register(SelectInst, UBSelectMixin)
+def _(term, smt):
+  with smt.local_nonpoison() as nc:
+    c = smt.eval(term.sel)
+
+  smt.add_defs(*nc)
+
+  x = smt.eval(term.arg1)
+  y = smt.eval(term.arg2)
+
+  return z3.If(c == 1, x, y)
+
+class UBSelect(UBSelectMixin, SMTUndef):
+  pass
+
+class NCCPSelectMixin(BaseSMTEncoder):
+  """Nondeterministic choice, conditional poison
+  """
+
+@eval.register(SelectInst, NCCPSelectMixin)
+def _(term, smt):
+  with smt.local_nonpoison() as nc:
+    c = smt.eval(term.sel)
+
+  if nc:
+    u = smt.fresh_var(smt.type(term.sel))
+    smt.add_qvar(u)
+    c = z3.If(mk_and(nc), c, u)
+
+  with smt.local_nonpoison() as nx:
+    x = smt.eval(term.arg1)
+
+  with smt.local_nonpoison() as ny:
+    y = smt.eval(term.arg2)
+
+  if nx or ny:
+    smt.add_nonpoison(z3.If(c == 1, mk_and(nx), mk_and(ny)))
+
+  return z3.If(c == 1, x, y)
+
+class NCCPSelect(NCCPSelectMixin, SMTUndef):
+  pass
+
+class CPSelectMixin(BaseSMTEncoder):
+  """Conditional poison
+  """
+
+@eval.register(SelectInst, CPSelectMixin)
 def _(term, smt):
   c = smt.eval(term.sel)
 
@@ -1109,18 +1245,12 @@ def _(term, smt):
 
   return z3.If(c == 1, x, y)
 
-@eval.register(Input, BaseBranchSelect)
-def _(term, smt):
-  ty = smt.type(term)
-  smt.add_nonpoison(z3.Bool('np_' + term.name))
-  return z3.Const(term.name, _ty_sort(ty))
+class CPSelect(CPSelectMixin, SMTUndef):
+  pass
 
-@eval.register(Symbol, BaseBranchSelect)
-def _(term, smt):
-  ty = smt.type(term)
-  return z3.Const(term.name, _ty_sort(ty))
 
-class PoisonOnly(BaseBranchSelect, SMTPoison):
+
+class PoisonOnly(CPSelectMixin, SMTPoison):
   pass
 
 @eval.register(FreezeInst, PoisonOnly)
@@ -1144,137 +1274,79 @@ def _(term, smt):
   return eval.dispatch(UndefValue, BaseBranchSelect)(term, smt)
 
 
-class EscalatePoison(BaseSMTEncoder):
-  pass
 
-@eval.register(SDivInst, EscalatePoison)
-def _(term, smt):
-  with smt.local_nonpoison() as nx:
-    x = smt.eval(term.x)
 
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
+# ----
+# Historical encoders
 
-  smt.add_nonpoison(*nx)
-  #smt.add_nonpoison(*ny)
-
-  smt.add_defs(y != 0, *ny)
-  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
-
-  if 'exact' in term.flags:
-    smt.add_nonpoison((x/y)*y == x)
-
-  return x/y
-
-@eval.register(UDivInst, EscalatePoison)
-def _(term, smt):
-  x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_defs(y != 0, *ny)
-
-  if 'exact' in term.flags:
-    smt.add_nonpoison(z3.UDiv(x,y)*y == x)
-
-  return z3.UDiv(x,y)
-
-@eval.register(SRemInst, EscalatePoison)
-def _(term, smt):
-  with smt.local_nonpoison() as nx:
-    x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_nonpoison(*nx)
-  #smt.add_nonpoison(*ny)
-
-  smt.add_defs(y != 0, *ny)
-  smt.add_defs(z3.Or(mk_and(nx + [x != 1 << (x.size()-1)]), y != -1))
-
-  return z3.SRem(x,y)
-
-@eval.register(URemInst, EscalatePoison)
-def _(term, smt):
-  x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_defs(y != 0, *ny)
-
-  return z3.URem(x,y)
-
-@eval.register(ShlInst, EscalatePoison)
-def _(term, smt):
-  x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_defs(z3.ULT(y, y.size()), *ny)
-
-  if 'nsw' in term.flags:
-    smt.add_nonpoison((x << y) >> y == x)
-
-  if 'nuw' in term.flags:
-    smt.add_nonpoison(z3.LShR(x << y, y) == x)
-
-  return x << y
-
-@eval.register(AShrInst, EscalatePoison)
-def _(term, smt):
-  x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_defs(z3.ULT(y, y.size()), *ny)
-
-  if 'exact' in term.flags:
-    smt.add_nonpoison((x >> y) << y == x)
-
-  return x >> y
-
-@eval.register(LShrInst, EscalatePoison)
-def _(term, smt):
-  x = smt.eval(term.x)
-
-  with smt.local_nonpoison() as ny:
-    y = smt.eval(term.y)
-
-  smt.add_defs(z3.ULT(y, y.size()), *ny)
-
-  if 'exact' in term.flags:
-    smt.add_nonpoison(z3.LShR(x, y) << y == x)
-
-  return z3.LShR(x, y)
-
-class Modern(PoisonOnly, EscalatePoison):
-  """
+class PLDI2015(BaseSMTEncoder):
+  """Preserve the encoding of Alive as of the original Alive paper.
   """
   pass
 
+@eval.register(Input, PLDI2015)
+@eval.register(Symbol, PLDI2015)  # make sure these are the same
+def _(term, smt):
+  ty = smt.type(term)
+  return z3.Const(term.name, _ty_sort(ty))
 
 
-class NewShlSemantics(BaseSMTEncoder):
-  pass
+eval.register(SDivInst, PLDI2015,
+  binop(operator.div,
+    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)],
+    poisons = {'exact': lambda x,y: (x/y)*y == x}))
 
-eval.register(ShlInst, NewShlSemantics,
+eval.register(UDivInst, PLDI2015,
+  binop(z3.UDiv,
+    defined = lambda x,y: [y != 0],
+    poisons = {'exact': lambda x,y: z3.UDiv(x,y)*y == x}))
+
+eval.register(SRemInst, PLDI2015,
+  binop(z3.SRem,
+    defined = lambda x,y: [y != 0, z3.Or(x != (1 << x.size()-1), y != -1)]))
+
+eval.register(URemInst, PLDI2015,
+  binop(z3.URem,
+    defined = lambda x,y: [y != 0]))
+
+eval.register(ShlInst, PLDI2015,
   binop(operator.lshift,
     defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {
+      'nsw': lambda x,y: (x << y) >> y == x,
+      'nuw': lambda x,y: z3.LShR(x << y, y) == x}))
+
+eval.register(AShrInst, PLDI2015,
+  binop(operator.rshift,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: (x >> y) << y == x}))
+
+eval.register(LShrInst, PLDI2015,
+  binop(z3.LShR,
+    defined = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x}))
+
+
+
+# -----
+# Miscellaneous encoders
+
+
+class NewShlMixin(BaseSMTEncoder):
+  pass
+
+eval.register(ShlInst, NewShlMixin,
+  shift_op(operator.lshift,
     poisons = {
     'nsw': lambda a,b: z3.Or((a << b) >> b == a,
                              z3.And(a == 1, b == b.size() - 1)),
     'nuw': lambda a,b: z3.LShR(a << b, b) == a}))
 
 
-class SMTPoisonNewShl(NewShlSemantics, SMTPoison):
+class SMTPoisonNewShl(NewShlMixin, SMTPoison):
   pass
 
-class SMTUndefNewShl(NewShlSemantics, SMTUndef):
+class SMTUndefNewShl(NewShlMixin, SMTUndef):
   pass
 
 
