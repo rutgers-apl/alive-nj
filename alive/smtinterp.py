@@ -526,7 +526,7 @@ def shift_op(op, poisons):
         smt.add_nonpoison(poisons[f](x,y,z))
 
     cond = [z3.ULT(y, y.size())]
-    return smt._conditional_value(cond, op(x,y), term.name)
+    return z
 
   return _
 
