@@ -24,18 +24,19 @@ def check(opt, type_model, encoding=config.encoding):
   smt = encoding(type_model)
 
   asm = smt.conjunction(opt.asm)
-  assert not asm.defined and not asm.nonpoison and not asm.qvars
   premise = asm.aux + asm.safe + asm.value
+  if asm.defined or asm.nonpoison:
+    raise Exception('Defined/Non-poison condition declared by assumption')
 
   pre = smt.conjunction(opt.pre)
-  assert not pre.defined and not pre.nonpoison and not pre.qvars
-    # TODO: make this an exception, or do something reasonable for these
-    # it is unclear what qvars in the precondition would mean
   premise += pre.aux
+  if pre.defined or pre.nonpoison:
+    raise Exception('Defined/Non-poison condition declared by precondition')
+
 
   src = smt(opt.src)
-  assert not src.aux
-  # TODO: exception here? Nothing in the source should have analysis
+  if src.aux:
+    raise Exception('Auxiliary condition declared by source')
 
   tgt = smt(opt.tgt)
   premise += tgt.aux
