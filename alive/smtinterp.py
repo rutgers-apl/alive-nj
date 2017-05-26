@@ -13,6 +13,7 @@ import types
 import collections
 from contextlib import contextmanager
 import warnings
+import functools
 
 # Z3 changed the API slightly after 4.4.1. This patches the old API
 # to look like the new one.
@@ -72,8 +73,8 @@ class BaseSMTEncoder():
     self.types = type_model
     self.fresh = 0
     self.reset()
-    self.attrs = collections.defaultdict(dict)
-      # term -> attr -> var
+    self._analysis = collections.defaultdict(dict)
+      # name -> key -> var
 
   def reset(self):
     self.defs = []  # current defined-ness conditions
@@ -237,6 +238,25 @@ class BaseSMTEncoder():
     self.fresh += 1
     return z3.Const(prefix + str(self.fresh), _ty_sort(ty))
 
+  def has_analysis(self, name, key):
+    return name in self._analysis and key in self._analysis[name]
+
+  def get_analysis(self, name, key):
+    return self._analysis[name][key]
+
+  def new_analysis(self, name, key, type=None):
+    if key in self._analysis[name]:
+      raise ValueError('Attempt to recreate analysis {} for {}'.format(
+        name, key))
+
+    self.fresh += 1
+    r = z3.Const(
+      'ana_{}_{}'.format(name, self.fresh),
+      z3.BoolSort() if type is None else _ty_sort(type))
+
+    self._analysis[name][key] = r
+    return r
+
   def _conditional_value(self, conds, v, name=''):
     raise NotImplementedError('{} does not support floating-point'.format(
       type(self).__name__.lower()))
@@ -255,39 +275,40 @@ class BaseSMTEncoder():
 
     if poisons:
       for f in poisons:
-        if f in self.attrs[term]:
-          self.add_nops(z3.Implies(self.attrs[term][f], poisons[f](x,y)))
-        elif f in term.flags:
-          self.add_nops(poisons[f](x,y))
+        try:
+          b = self.get_analysis(f, term)
+          self.add_nonpoison(z3.Implies(b, poisons[f](x, y)))
+        except KeyError:
+          if f in term.flags:
+            self.add_nonpoison(poisons[f](x, y))
 
     return op(x,y)
 
   def _float_binary_operator(self, term, op):
-    logger.debug('_fbo: %s\n%s', term, self.attrs[term])
     x = self.eval(term.x)
     y = self.eval(term.y)
     z = op(x,y)
 
     conds = []
-    if 'nnan' in self.attrs[term]:
+    if self.has_analysis('nnan', term):
       df = z3.And(z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
         z3.Not(z3.fpIsNaN(z)))
-      conds.append(z3.Implies(self.attrs[term]['nnan'], df))
+      conds.append(z3.Implies(self.get_analysis('nnan', term), df))
 
     elif 'nnan' in term.flags:
       conds += [z3.Not(z3.fpIsNaN(x)), z3.Not(z3.fpIsNaN(y)),
         z3.Not(z3.fpIsNaN(z))]
 
-    if 'ninf' in self.attrs[term]:
+    if self.has_analysis('ninf', term):
       df = z3.And(z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
         z3.Not(z3.fpIsInf(z)))
-      conds.append(z3.Implies(self.attrs[term]['ninf'], df))
+      conds.append(z3.Implies(self.get_analysis('ninf', term), df))
 
     elif 'ninf' in term.flags:
       conds += [z3.Not(z3.fpIsInf(x)), z3.Not(z3.fpIsInf(y)),
         z3.Not(z3.fpIsInf(z))]
 
-    if 'nsz' in self.attrs[term] or 'nsz' in term.flags:
+    if self.has_analysis('nsz', term) or 'nsz' in term.flags:
       # NOTE: this will return a different qvar for each (in)direct reference
       # to this term. Is this desirable?
       b = self.fresh_bool()
@@ -295,16 +316,16 @@ class BaseSMTEncoder():
       z = op(x,y)
 
       c = z3.fpIsZero(z)
-      if 'nsz' in self.attrs[term]:
-        c = z3.And(self.attrs[term]['nsz'], c)
+      if self.has_analysis('nsz', term):
+        c = z3.And(self.get_analysis('nsz', term), c)
 
       s = _ty_sort(self.type(term))
       z = z3.If(c, z3.If(b, 0, z3.fpMinusZero(s)), z)
 
       if isinstance(term, FDivInst):
         c = [z3.Not(z3.fpIsZero(x)), z3.fpIsZero(y)]
-        if 'nsz' in self.attrs[term]:
-          c.append(self.attrs[term]['nsz'])
+        if self.has_analysis('nsz', term):
+          c.append(self.get_analysis('nsw', term))
 
         z = z3.If(z3.And(c),
           z3.If(b, z3.fpPlusInfinity(s), z3.fpMinusInfinity(s)),
@@ -345,33 +366,6 @@ class BaseSMTEncoder():
     'true': lambda x,y: z3.BoolVal(True),
   }
 
-  def _must_analysis(self, term, op):
-    with self.local_nonpoison(), self.local_defined():
-      args = [self.eval(a) for a in term._args]
-
-    if all(isinstance(a, Constant) for a in term._args):
-      return op(*args)
-
-    c = self.fresh_bool()
-    self.add_aux(z3.Implies(c, op(*args)))
-    return c
-
-  def _has_attr(self, attr, term):
-    if attr in term.flags:
-      return z3.BoolVal(True)
-
-    return self._get_attr_var(attr, term)
-
-  def _get_attr_var(self, attr, term):
-    if attr in self.attrs[term]:
-      return self.attrs[term][attr]
-
-    # TODO: pick name better
-    b = self.fresh_bool()
-    logger.debug('Creating attr var %s for %s:%s', b, term, attr)
-    self.attrs[term][attr] = b
-    return b
-
 
 def lookup(encoder):
   """Return an SMT encoder with this name (case-insensitive).
@@ -408,8 +402,26 @@ def eval(term, smt):
   raise NotImplementedError("cannot eval {} with {}".format(
     type(term).__name__, type(smt).__name__))
 
-def _handler(op):
-  return lambda term,smt: op(*(smt.eval(a) for a in term.args()))
+def general_handler(fun):
+  """Returns a curried form a function, suitable for use as argument to
+  eval.register.
+
+  Usage:
+    @general_handler
+    def spam(term, smt, eggs):
+      ...
+
+    eval.register(Term, Encoder, spam(eggs))
+  """
+  def wrapper(*args):
+    return lambda term, smt: fun(term, smt, *args)
+
+  functools.update_wrapper(wrapper, fun)
+  return wrapper
+
+@general_handler
+def _handler(term, smt, op):
+  return op(*(smt.eval(a) for a in term.args()))
 
 @eval.register(Node, BaseSMTEncoder)
 def _(term, smt):
@@ -520,8 +532,9 @@ def shift_op(op, poisons):
     z = smt._conditional_value([z3.ULT(y, y.size())], op(x,y), term.name)
 
     for f in poisons:
-      if f in smt.attrs[term]:
-        smt.add_nonpoison(z3.Implies(self.attrs[term][f], poisons[f](x,y,z)))
+      if smt.has_analysis(f, term):
+        smt.add_nonpoison(
+          z3.Implies(smt.get_analysis(f, term), poisons[f](x,y,z)))
       elif f in term.flags:
         smt.add_nonpoison(poisons[f](x,y,z))
 
@@ -868,41 +881,41 @@ def _abs(term, smt):
 
   return z3.If(x >= 0, x, -x)
 
-@eval.register(SignBitsCnxp, BaseSMTEncoder)
-def _signbits(term, smt):
-  with smt.local_defined(), smt.local_nonpoison():
-    x = smt.eval(term._args[0])
+@general_handler
+def value_analysis(term, smt, name, exact, restrict):
+  arg = term._args[0]
+  try:
+    return smt.get_analysis(name, arg)
+  except KeyError:
+    pass
+
   ty = smt.type(term)
-
-  #b = ComputeNumSignBits(smt.fresh_bv(size), size)
-  b = smt.fresh_var(ty, 'ana_')
-
-  smt.add_aux(z3.ULE(b, ComputeNumSignBits(ty.width, x)))
-  # FIXME: exact results for constants
-
-  return b
-
-@eval.register(OneBitsCnxp, BaseSMTEncoder)
-def _ones(term, smt):
   with smt.local_defined(), smt.local_nonpoison():
-    x = smt.eval(term._args[0])
-  b = smt.fresh_var(smt.type(term), 'ana_')
+    x = smt.eval(arg)
 
-  smt.add_aux(b & ~x == 0)
+  z = exact(x, ty)
 
-  return b
+  if isinstance(arg, Constant):
+    return z
 
-@eval.register(ZeroBitsCnxp, BaseSMTEncoder)
-def _zeros(term, smt):
-  with smt.local_defined(), smt.local_nonpoison():
-    x = smt.eval(term._args[0])
+  r = smt.new_analysis(name, arg, type=ty)
+  smt.add_aux(restrict(r, z))
+  return r
 
-  b = smt.fresh_var(smt.type(term), 'ana_')
-  # FIXME: make sure each reference to this analysis is the same
+eval.register(SignBitsCnxp, BaseSMTEncoder,
+  value_analysis('numsignbits',
+    lambda x, ty: ComputeNumSignBits(ty.width, x),
+    lambda r, z: z3.ULE(r, z)))
 
-  smt.add_aux(b & x == 0)
+eval.register(OneBitsCnxp, BaseSMTEncoder,
+  value_analysis('onebits',
+    lambda x, ty: x,
+    lambda r, z: r & ~z == 0))
 
-  return b
+eval.register(ZeroBitsCnxp, BaseSMTEncoder,
+  value_analysis('zerobits',
+    lambda x, ty: ~x,
+    lambda r, z: r & ~z == 0))
 
 eval.register(LeadingZerosCnxp, BaseSMTEncoder,
   lambda term,smt: ctlz(smt.type(term).width,
@@ -1039,27 +1052,51 @@ def _comparison(term, smt):
 
   return cmp(smt.eval(term.x), smt.eval(term.y))
 
-def _must(op):
-  return lambda t,s: s._must_analysis(t, op)
+@general_handler
+def must_analysis(term, smt, name, op):
+  logger.debug('Must-analysis %s of %s', name, term)
+  args = term._args
+
+  try:
+    return smt.get_analysis(name, args)
+  except KeyError:
+    pass
+
+  with smt.local_defined(), smt.local_nonpoison():
+    arg_smts = tuple(smt.eval(a) for a in args)
+
+  if all(isinstance(a, Constant) for a in args):
+    return op(*arg_smts)
+
+  r = smt.new_analysis(name, args)
+  smt.add_aux(z3.Implies(r, op(*arg_smts)))
+  return r
+
+@general_handler
+def has_attr(term, smt, attr):
+  arg = term._args[0]
+  if attr in arg.flags:
+    return z3.BoolVal(True)
+
+  try:
+    return smt.get_analysis(attr, arg)
+  except KeyError:
+    return smt.new_analysis(attr, arg)
 
 eval.register(CannotBeNegativeZeroPred, BaseSMTEncoder,
-  _must(lambda x: z3.Not(x == z3.fpMinusZero(x.sort()))))
+  must_analysis('nominuszero', lambda x: z3.Not(x == z3.fpMinusZero(x.sort()))))
 
 eval.register(FPIdenticalPred, BaseSMTEncoder, _handler(operator.eq))
 
 eval.register(FPIntegerPred, BaseSMTEncoder,
   _handler(lambda x: x == z3.fpRoundToIntegral(z3.RTZ(), x)))
 
-
-def _has_attr(attr):
-  return lambda t,s: s._has_attr(attr, t._args[0])
-
-eval.register(HasNInfPred, BaseSMTEncoder, _has_attr('ninf'))
-eval.register(HasNNaNPred, BaseSMTEncoder, _has_attr('nnan'))
-eval.register(HasNSWPred, BaseSMTEncoder, _has_attr('nsw'))
-eval.register(HasNSZPred, BaseSMTEncoder, _has_attr('nsz'))
-eval.register(HasNUWPred, BaseSMTEncoder, _has_attr('nuw'))
-eval.register(IsExactPred, BaseSMTEncoder, _has_attr('exact'))
+eval.register(HasNInfPred, BaseSMTEncoder, has_attr('ninf'))
+eval.register(HasNNaNPred, BaseSMTEncoder, has_attr('nnan'))
+eval.register(HasNSWPred, BaseSMTEncoder, has_attr('nsw'))
+eval.register(HasNSZPred, BaseSMTEncoder, has_attr('nsz'))
+eval.register(HasNUWPred, BaseSMTEncoder, has_attr('nuw'))
+eval.register(IsExactPred, BaseSMTEncoder, has_attr('exact'))
 
 @eval.register(IsConstantPred, BaseSMTEncoder)
 def _(term, smt):
@@ -1072,18 +1109,19 @@ def _(term, smt):
 
   assert isinstance(arg, Input)
 
-  # if this is in input, we can return true or false, but we
-  # need to do so consistently
-  return smt._get_attr_var('is_const', arg)
+  try:
+    return smt.get_analysis('isconstant', term)
+  except KeyError:
+    return smt.new_analysis('isconstant', term)
 
 eval.register(IntMinPred, BaseSMTEncoder,
   _handler(lambda x: x == 1 << (x.size()-1)))
 
 eval.register(Power2Pred, BaseSMTEncoder,
-  _must(lambda x: z3.And(x != 0, x & (x-1) == 0)))
+  must_analysis('power2', lambda x: z3.And(x != 0, x & (x-1) == 0)))
 
 eval.register(Power2OrZPred, BaseSMTEncoder,
-  _must(lambda x: x & (x-1) == 0))
+  must_analysis('power2orZ', lambda x: x & (x-1) == 0))
 
 @eval.register(ShiftedMaskPred, BaseSMTEncoder)
 def _(term, smt):
@@ -1092,19 +1130,23 @@ def _(term, smt):
   return z3.And(v != 0, ((v+1) & v) == 0)
 
 eval.register(MaskZeroPred, BaseSMTEncoder,
-  _must(lambda x,y: x & y == 0))
+  must_analysis('maskzero', lambda x,y: x & y == 0))
 
 eval.register(NSWAddPred, BaseSMTEncoder,
-  _must(lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y)))
+  must_analysis('nswadd',
+    lambda x,y: z3.SignExt(1,x) + z3.SignExt(1,y) == z3.SignExt(1,x+y)))
 
 eval.register(NUWAddPred, BaseSMTEncoder,
-  _must(lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)))
+  must_analysis('nuwadd',
+    lambda x,y: z3.ZeroExt(1,x) + z3.ZeroExt(1,y) == z3.ZeroExt(1,x+y)))
 
 eval.register(NSWSubPred, BaseSMTEncoder,
-  _must(lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y)))
+  must_analysis('nswsub',
+    lambda x,y: z3.SignExt(1,x) - z3.SignExt(1,y) == z3.SignExt(1,x-y)))
 
 eval.register(NUWSubPred, BaseSMTEncoder,
-  _must(lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)))
+  must_analysis('nuwsub',
+    lambda x,y: z3.ZeroExt(1,x) - z3.ZeroExt(1,y) == z3.ZeroExt(1,x-y)))
 
 @eval.register(NSWMulPred, BaseSMTEncoder)
 @_handler
