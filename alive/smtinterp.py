@@ -890,7 +890,7 @@ def value_analysis(term, smt, name, exact, restrict):
     pass
 
   ty = smt.type(term)
-  with smt.local_defined(), smt.local_nonpoison():
+  with smt.local_defined(), smt.local_nonpoison() as nx:
     x = smt.eval(arg)
 
   z = exact(x, ty)
@@ -899,7 +899,9 @@ def value_analysis(term, smt, name, exact, restrict):
     return z
 
   r = smt.new_analysis(name, arg, type=ty)
-  smt.add_aux(restrict(r, z))
+  smt.add_aux(*mk_implies(nx, [restrict(r, z)]))
+  # this allows the analysis to be incorrect if the argument is poison
+  # if the argument has undefined behavior, then the result should be irrelevant
   return r
 
 eval.register(SignBitsCnxp, BaseSMTEncoder,
@@ -1062,14 +1064,18 @@ def must_analysis(term, smt, name, op):
   except KeyError:
     pass
 
-  with smt.local_defined(), smt.local_nonpoison():
+  with smt.local_defined(), smt.local_nonpoison() as np:
     arg_smts = tuple(smt.eval(a) for a in args)
 
   if all(isinstance(a, Constant) for a in args):
     return op(*arg_smts)
 
   r = smt.new_analysis(name, args)
-  smt.add_aux(z3.Implies(r, op(*arg_smts)))
+  np.append(r)
+  smt.add_aux(z3.Implies(mk_and(np), op(*arg_smts)))
+  # this allows the analysis to be incorrect when the argument is poison
+  # if the argument has undefined behavior, then the source will have undefined
+  # behavior, so it does not matter whether the precondition is satisfied
   return r
 
 @general_handler
