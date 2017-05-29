@@ -830,10 +830,17 @@ eval.register(SubCnxp, BaseSMTEncoder, binop(operator.sub))
 eval.register(MulCnxp, BaseSMTEncoder, binop(operator.mul))
 eval.register(UDivCnxp, BaseSMTEncoder, _cbinop(z3.UDiv, lambda x,y: y != 0))
 
-# LLVM 3.8.0 APInt srem implemented via urem
-# SMT-LIB does not appear to define srem
-eval.register(SRemCnxp, BaseSMTEncoder,
-  _cbinop(operator.mod, lambda x,y: y != 0))
+# only integer remainder by 0 is unsafe
+@eval.register(SRemCnxp, BaseSMTEncoder)
+def _(term, smt):
+  x = smt.eval(term.x)
+  y = smt.eval(term.y)
+
+  if isinstance(smt.type(term), IntType):
+    smt.add_safe(y != 0)
+
+  return x % y
+
 eval.register(URemCnxp, BaseSMTEncoder,
   _cbinop(z3.URem, lambda x,y: y != 0))
 
