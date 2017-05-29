@@ -1320,6 +1320,7 @@ def _(term, smt):
   ty = smt.type(term)
   u  = z3.Const('frozen_' + term.name, _ty_sort(ty))
   # TODO: don't assume unique names
+  smt.add_qvar(u)
 
   return z3.If(mk_and(n), x, u)
 
