@@ -107,28 +107,32 @@ def fpUEQ(x, y):
 def detect_fpMod():
   """Determine whether Z3's fpRem is correct, and set fpMod accordingly.
   """
-  global fpMod
   import logging
   log = logging.getLogger(__name__)
   log.debug('Setting fpMod')
 
   if z3.is_true(z3.simplify(z3.FPVal(3, z3.Float32()) % 2 < 0)):
     log.debug('Correct fpRem detected')
-    fpMod = fpMod_using_fpRem
+    fpMod.__code__ = fpMod_using_fpRem.__code__
   else:
     log.debug('fpRem = fpMod')
-    fpMod = z3.fpRem
+    fpMod.__code__ = fpRem_trampoline.__code__
 
 
 # Wait until fpMod is called, then determine which implementation it should
 # have. Subsequent calls will use that implementation directly.
-def fpMod(x, y):
+def fpMod(x, y, ctx=None):
   detect_fpMod()
-  return fpMod(x, y)
+  return fpMod(x, y, ctx)
 
 # It would be great if this had a less complicated implementation
-def fpMod_using_fpRem(x, y):
+def fpMod_using_fpRem(x, y, ctx=None):
   y = z3.fpAbs(y)
-  z = z3.fpRem(z3.fpAbs(x), y)
-  r = z3.If(z3.fpIsNegative(z), z + y, z)   # does rounding mode matter here?
-  return z3.If(z3.Not(z3.fpIsNegative(x) == z3.fpIsNegative(r)), z3.fpNeg(r), r)
+  z = z3.fpRem(z3.fpAbs(x), y, ctx)
+  r = z3.If(z3.fpIsNegative(z), z + y, z, ctx) # does rounding mode matter here?
+  return z3.If(
+    z3.Not(z3.fpIsNegative(x) == z3.fpIsNegative(r), ctx), z3.fpNeg(r), r, ctx)
+
+# synonym for fpRem, but located in this module (i.e., same globals in scope)
+def fpRem_trampoline(x, y, ctx=None):
+  return z3.fpRem(x, y)
