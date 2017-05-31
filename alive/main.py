@@ -10,6 +10,7 @@ from . import error
 from . import typing
 from . import refinement
 from . import smtinterp
+from .util.args import NegatableFlag
 from .parser import read_opt_files
 
 class StatusReporter(object):
@@ -155,36 +156,37 @@ def verify_opts(opts,
   status_reporter.final_status()
 
 def main(
-    persist         = config.persist,
-    quiet           = config.quiet,
-    encoding        = config.encoding,
-    rounding_mode   = None,
-    bench_dir       = None,
-    bench_threshold = None,
+    default_persist         = config.persist,
+    default_quiet           = config.quiet,
+    default_encoding        = config.encoding,
+    default_rounding_mode   = None,
+    default_bench_dir       = None,
+    default_bench_threshold = None,
+    filter                  = None,
   ):
   logging.config.dictConfig(config.logs)
 
   parser = argparse.ArgumentParser()
-  parser.add_argument('--persist', action='store_true',
-    default=persist,
+  parser.add_argument('-p', '--persist', action=NegatableFlag,
+    default=default_persist,
     help='continue processing opts after verification failures')
-  parser.add_argument('--quiet', action='store_true',
-    default=quiet,
-    help='only print number of tested and unverified opts')
+  parser.add_argument('-q', '--quiet', action=NegatableFlag,
+    default=default_quiet,
+    help='only print unverified optimizations')
   parser.add_argument('-e', '--encoding', '--translator', action='store',
-    default=encoding,
+    default=default_encoding,
     help='specify SMT encoding for verification')
   parser.add_argument('-E', '--list-encodings', action='store_true',
-    help='list available SMT encodings')
+    help='list available SMT encodings and exit')
   parser.add_argument('-r', '--rounding-mode', action='store',
     choices=rounding_modes,
-    default=rounding_mode,
+    default=default_rounding_mode,
     help='rounding mode for arithmetic')
   parser.add_argument('--bench-dir', action='store',
-    default=bench_dir,
+    default=default_bench_dir,
     help='generate SMT2 benchmarks in this directory')
   parser.add_argument('--bench-threshold', action='store', type=float,
-    default=bench_threshold,
+    default=default_bench_threshold,
     help='minimum solve time (s) needed to trigger benchmark generation')
   parser.add_argument('file', type=argparse.FileType('r'), nargs='*',
     default=[sys.stdin],
@@ -212,7 +214,12 @@ def main(
     z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 
   try:
-    verify_opts(read_opt_files(args.file),
+    opts = read_opt_files(args.file)
+
+    if filter:
+      opts = itertools.ifilter(filter, opts)
+
+    verify_opts(opts,
       quiet    = args.quiet,
       persist  = args.persist,
       encoding = args.encoding,
