@@ -5,7 +5,6 @@ Refinement checking for optimizations.
 from . import config
 from . import error
 from . import smtinterp
-from . import typing
 import z3
 import glob
 import logging
@@ -171,7 +170,7 @@ class CounterExampleError(Error):
     name_width = 1
     rows = []
     for v in vars:
-      ty = str(self.types[typing.context[v]])
+      ty = str(self.types[v])
       ty_width = max(ty_width, len(ty))
 
       name = v.name
@@ -211,7 +210,7 @@ Example:
 source: {srcval}
 target: {tgtval}'''.format(
       cause = self.cause_str[self.cause],
-      srcty = self.types[typing.context[self.src]],
+      srcty = self.types[self.src],
       src = self.src.name,
       table = '\n'.join(
         '{0:>{1}} {2:{3}} = {4}'.format(ty, ty_width, name, name_width, val)

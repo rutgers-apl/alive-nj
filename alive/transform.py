@@ -63,22 +63,33 @@ class Transform(pretty.PrettyRepr):
 
     return t
 
-  def abstract_type_model(self):
-    if not hasattr(self, '_model'):
-      self._model = self.type_constraints().get_type_model()
+  @property
+  def type_environment(self):
+    try:
+      return self._env
+    except AttributeError:
+      env = self.type_constraints().make_environment()
+      self._env = env
+      return env
 
-    return self._model
+  @type_environment.deleter
+  def type_environment(self):
+      try:
+        del self._env
+      except AttributeError:
+        pass
 
   def type_models(self):
-    return self.abstract_type_model().type_vectors()
+    return self.type_environment.models()
 
   def validate_model(self, type_vector):
     """Return whether the type vector meets this opt's constraints.
     """
 
-    model = self.abstract_type_model()
-    V = typing.Validator(model, type_vector)
-    seen = set()
+    if isinstance(type_vector, typing.TypeModel):
+      type_vector = type_vector.types
+
+    V = typing.Validator(self.type_environment, type_vector)
 
     try:
       V.eq_types(self.src, self.tgt)

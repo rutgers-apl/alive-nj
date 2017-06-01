@@ -6,14 +6,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-Config = collections.namedtuple('Config', 'symbols type_reps model')
-# symbols:   maps tyvars to terms
-# type_reps: list of terms to use for width()
-# model:     the AbstractTypeModel
+Config = collections.namedtuple('Config', 'symbols type_reps environment')
+# symbols:     maps tyvars to terms
+# type_reps:   list of terms to use for width()
+# environment: the TypeEnvironment
 
-def set_type(term, tyvar):
-  assert term not in typing.context
-  typing.context[term] = tyvar
+def set_type(config, term, tyvar):
+  assert term not in config.environment.vars
+  config.environment.vars[term] = tyvar
   return term
 
 #binops = L.BinaryCnxp.codes.values()
@@ -87,11 +87,11 @@ def predicates(config):
 
 def sized_predicates(config, size):
   tys = config.symbols.keys()
-  tys.append(config.model.default_id)  # shouldn't already be there
+  tys.append(config.environment.default_id)  # shouldn't already be there
 
   # comparisons
   for ty in tys:
-    zero = set_type(L.Literal(0), ty)
+    zero = set_type(config, L.Literal(0), ty)
 
     # E == 0, E < 0, E > 0
     for t,b in expressions(config, ty, size-1):
@@ -130,7 +130,7 @@ def sized_predicates(config, size):
 
 def expressions(config, ty, size, **kws):
   return itertools.chain(
-    [(set_type(L.Literal(1), ty), True)]
+    [(set_type(config, L.Literal(1), ty), True)]
                                if size == 1 and kws.get('one',False) else [],
     atoms(config, ty, size)    if kws.get('atoms',True) else [],
     sums(config, ty, size)     if kws.get('sums',True) else [],
@@ -143,7 +143,7 @@ def expressions(config, ty, size, **kws):
 
 def neg_expressions(config, ty, size, **kws):
   for t,b in expressions(config, ty, size, **kws):
-    yield set_type(L.NegCnxp(t), ty), b
+    yield set_type(config, L.NegCnxp(t), ty), b
 
 def atoms(config, ty, size):
   if size != 1: return
@@ -152,19 +152,20 @@ def atoms(config, ty, size):
     yield (s, False)
 
   for r in config.type_reps:
-    yield set_type(L.WidthCnxp(r), ty), ty != config.model.default_id
+    yield set_type(config, L.WidthCnxp(r), ty), \
+      ty != config.environment.default_id
 
 def sums(config, ty, size):
   def combine(x, (y,by), neg):
     if x is None:
       if neg:
-        return set_type(L.NegCnxp(y), ty), by
+        return set_type(config, L.NegCnxp(y), ty), by
       return (y,by)
 
     x,bx = x
     if neg:
-      return set_type(L.SubCnxp(x,y), ty), bx and by
-    return set_type(L.AddCnxp(x,y), ty), bx and by
+      return set_type(config, L.SubCnxp(x,y), ty), bx and by
+    return set_type(config, L.AddCnxp(x,y), ty), bx and by
 
   return assocs(size, combine,
     neg_subexprs=lambda s: expressions(config, ty, s, one=True, sums=False))
@@ -176,7 +177,7 @@ def products(config, ty, size):
 
     x,bx = x
     y,by = y
-    return set_type(L.MulCnxp(x,y), ty), bx and by
+    return set_type(config, L.MulCnxp(x,y), ty), bx and by
 
   return assocs(size, combine,
     subexprs=lambda s: expressions(config, ty, s, sums=False, products=False))
@@ -184,21 +185,21 @@ def products(config, ty, size):
 def logic(config, ty, size):
   def Or(x, (y,by), neg):
     if neg:
-      y = set_type(L.NotCnxp(y), ty)
+      y = set_type(config, L.NotCnxp(y), ty)
     if x is None:
       return y,by
 
     x,bx = x
-    return set_type(L.OrCnxp(x,y), ty), bx and by
+    return set_type(config, L.OrCnxp(x,y), ty), bx and by
 
   def And(x, (y,by), neg):
     if neg:
-      y = set_type(L.NotCnxp(y), ty)
+      y = set_type(config, L.NotCnxp(y), ty)
     if x is None:
       return y,by
 
     x,bx = x
-    return set_type(L.AndCnxp(x,y), ty), bx and by
+    return set_type(config, L.AndCnxp(x,y), ty), bx and by
 
   def subexprs(size):
     return expressions(config, ty, size, logic=False)
@@ -218,7 +219,7 @@ def xors(config, ty, size):
       return y,by
 
     x,bx = x
-    return set_type(L.XorCnxp(x,y), ty), bx and by
+    return set_type(config, L.XorCnxp(x,y), ty), bx and by
 
   return assocs(size, Xor,
     subexprs=lambda s: itertools.chain(
@@ -245,11 +246,11 @@ def nonassoc(config, ty, size):
     for r,br in div_subexprs(rsize):
       for l,bl in div_subexprs(lsize):
         for op in _div_ops:
-          yield set_type(op(l,r),ty), br and bl
+          yield set_type(config, op(l,r),ty), br and bl
 
       for l,bl in shift_lexpr(lsize):
         for op in _shift_ops:
-          yield set_type(op(l,r),ty), br and bl
+          yield set_type(config, op(l,r),ty), br and bl
 
 
 
@@ -258,12 +259,13 @@ def funcs(config, ty, size):
 
   for t,b in expressions(config, ty, size-1):
     if b: continue
-    yield set_type(L.AbsCnxp(t), ty), b
+    yield set_type(config, L.AbsCnxp(t), ty), b
 
   for argty in config.symbols.iterkeys():
     for t,b in expressions(config, argty, size-1):
       if b: continue
-      yield set_type(L.Log2Cnxp(t), ty), ty != config.model.default_id
+      yield set_type(config, L.Log2Cnxp(t), ty), \
+        ty != config.environment.default_id
 
 
 

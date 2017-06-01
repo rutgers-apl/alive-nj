@@ -27,19 +27,22 @@ def mk_implies(premises, consequents):
 
   return consequents
 
-TestCase = collections.namedtuple('TestCase', ['type_vector', 'values'])
+TestCase = collections.namedtuple('TestCase', ['type_model', 'values'])
+# TODO: better to have just the vector here, and pass the environment separately
+# in particular, environments currently just do pointer equality, so we'll
+# get duplicates as we add new test cases
 
 REJECT, ACCEPT, UNSAFE = range(3)
 
 def test_feature(pred, test_case, cache):
   try:
-    pred_smt = cache[test_case.type_vector]
+    pred_smt = cache[test_case.type_model]
   except KeyError:
-    smt = Encoder(test_case.type_vector)
+    smt = Encoder(test_case.type_model)
     pre = smt(pred)
     assert not (pre.defined or pre.nonpoison or pre.aux or pre.qvars)
     pred_smt = (pre.safe, pre.value)
-    cache[test_case.type_vector] = pred_smt
+    cache[test_case.type_model] = pred_smt
 
   if pred_smt[0]:
     safe = z3.simplify(z3.substitute(mk_and(pred_smt[0]), *test_case.values))
@@ -899,7 +902,7 @@ def eval_inputs(smt, inputs):
 
   return vars
 
-def make_test_cases(opt, symbols, inputs, type_vectors,
+def make_test_cases(opt, symbols, inputs, type_models,
     num_random, num_good, num_bad, assumptions=(), strengthen=False):
   log = logger.getChild('make_test_cases')
 
@@ -910,10 +913,10 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
   assert num_bad > 0
   num_random = max(0, num_random)
 
-  for type_vector in type_vectors:
-    log.debug('Making cases for %s', type_vector)
+  for type_model in type_models:
+    log.debug('Making cases for %s', type_model.types)
 
-    smt = Encoder(type_vector)
+    smt = Encoder(type_model)
 
     symbol_smts = [smt.eval(t) for t in symbols]
 
@@ -930,7 +933,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
     log.debug('%s counter-examples', len(solver_bads))
 
-    bads.extend(TestCase(type_vector, tc) for tc in solver_bads)
+    bads.extend(TestCase(type_model, tc) for tc in solver_bads)
     reporter.test_cases(goods, bads)
 
     skip = set(tuple(v.as_long() for (_,v) in tc) for tc in solver_bads)
@@ -948,7 +951,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
       log.debug('%s pro-examples', len(solver_goods))
 
-      goods.extend(TestCase(type_vector, tc) for tc in solver_goods)
+      goods.extend(TestCase(type_model, tc) for tc in solver_goods)
       skip.update(tuple(v.as_long() for (_,v) in tc) for tc in solver_goods)
       reporter.test_cases(goods, bads)
 
@@ -956,7 +959,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
     query = mk_and(premise + [mk_not(body)])
     # premise has to be included in both because it might contain tgt.aux
 
-    symbol_types = [type_vector[typing.context[s]] for s in symbols]
+    symbol_types = [type_model[s] for s in symbols]
     corner_tcs = get_corner_cases(symbol_types)
     random_tcs = itertools.islice(random_cases(symbol_types), num_random)
 
@@ -965,7 +968,7 @@ def make_test_cases(opt, symbols, inputs, type_vectors,
 
       skip.add(tc_vals)
 
-      tc = TestCase(type_vector,
+      tc = TestCase(type_model,
         tuple(itertools.imap(lambda s,v,ty: (s, z3.BitVecVal(v, ty.width)),
           symbol_smts, tc_vals, symbol_types)))
 
@@ -1005,9 +1008,9 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
   log = logger.getChild('check_refinement')
   reporter.begin_solving()
 
-  for type_vector in opt.type_models():
+  for type_model in opt.type_models():
     reporter.test_precondition()
-    smt = Encoder(type_vector)
+    smt = Encoder(type_model)
 
     premise, body, _ = interpret_opt(smt, opt, assumptions)
 
@@ -1032,7 +1035,7 @@ def check_refinement(opt, assumptions, pre, symbols, solver_bad):
         log.error('Got incomplete model %s\n%s', counter_examples, e)
         raise Failure('Incomplete model. Please send us the log.')
 
-      return [TestCase(type_vector, tc) for tc in counter_examples]
+      return [TestCase(type_model, tc) for tc in counter_examples]
 
   return []
 
@@ -1044,10 +1047,10 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
   log.debug('Checking completeness')
   reporter.begin_solving()
 
-  for type_vector in opt.type_models():
-    log.debug('checking types %s', type_vector)
+  for type_model in opt.type_models():
+    log.debug('checking types %s', type_model.types)
     reporter.test_precondition() # make more specific?
-    smt = Encoder(type_vector)
+    smt = Encoder(type_model)
 
     premise, body, filter = interpret_opt(smt, opt, assumptions)
     input_smts = eval_inputs(smt, inputs)
@@ -1075,11 +1078,11 @@ def check_completeness(opt, assumptions, pre, symbols, inputs, solver_good):
         log.error('Got incomplete model %s\n%s', false_negatives, e)
         raise Failure('Incomplete model. Please send us the log.')
 
-      return [TestCase(type_vector, tc) for tc in false_negatives]
+      return [TestCase(type_model, tc) for tc in false_negatives]
 
   return []
 
-def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
+def check_safety(assumptions, pre, prepre, type_env, symbols, solver_unsafe):
   """Check whether a pre-precondition ensures the safety of a precondition.
   Returns (counter_examples, safe_examples), where counter_examples
   are accepted by prepre, but unsafe for pre and safe_examples are
@@ -1092,10 +1095,10 @@ def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
   log = logger.getChild('check_safety')
   log.debug('Checking precondition safety')
 
-  for type_vector in type_model.type_vectors():
-    log.debug('Checking types %s', type_vector)
+  for type_model in type_env.models():
+    log.debug('Checking types %s', type_model.types)
     reporter.test_precondition()
-    smt = Encoder(type_vector)
+    smt = Encoder(type_model)
 
     P  = smt(pre)
     assert not P.qvars and not P.defined and not P.nonpoison
@@ -1135,7 +1138,7 @@ def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
 
     if counter_examples:
       log.info('Unsafe examples: %s', counter_examples)
-      return [TestCase(type_vector, tc) for tc in counter_examples], []
+      return [TestCase(type_model, tc) for tc in counter_examples], []
 
     # check whether PP rejects examples that P safely accepts
     query = mk_and(premise + PP.aux + P.aux + P.safe +
@@ -1148,7 +1151,7 @@ def check_safety(assumptions, pre, prepre, type_model, symbols, solver_unsafe):
 
     if positive_examples:
       log.info('False unsafe: %s', positive_examples)
-      return [], [TestCase(type_vector, tc) for tc in positive_examples]
+      return [], [TestCase(type_model, tc) for tc in positive_examples]
 
   return [], []
 
@@ -1168,7 +1171,7 @@ def ensure_safety(pre, assumptions, config, symbols, positives, negatives,
   unsafe = [e for e in negatives if test_feature(pre, e, cache) == UNSAFE]
   if not unsafe:
     unsafe, _ = check_safety(
-      assumptions, pre, L.TruePred, config.model, symbols, solver_unsafe)
+      assumptions, pre, L.TruePred, config.environment, symbols, solver_unsafe)
 
   log.info('Unsafe examples: %s', len(unsafe))
 
@@ -1183,7 +1186,7 @@ def ensure_safety(pre, assumptions, config, symbols, positives, negatives,
       Formatted(prepre, indent=2, start_at=2))
 
     unsafe_examples, safe_examples = check_safety(
-      assumptions, pre, prepre, config.model, symbols, solver_unsafe)
+      assumptions, pre, prepre, config.environment, symbols, solver_unsafe)
 
     if not unsafe_examples and not safe_examples:
       return L.AndPred([prepre, pre])
@@ -1211,44 +1214,44 @@ def infer_precondition(opt,
       '%s randoms, %s +solver, %s -solver)',
       opt.name, len(features), random_cases, solver_good, solver_bad)
 
-  type_model = opt.abstract_type_model()
-  type_vectors = list(exponential_sample(type_model.type_vectors()))
+  type_env = opt.type_environment
+  type_models = list(exponential_sample(type_env.models()))
 
   for t in assumptions:
-    type_model.extend(t)
+    type_env.extend(t)
 
   for t in features:
-    type_model.extend(t)
+    type_env.extend(t)
 
   symbols = []
   ty_symbols = collections.defaultdict(list)
   inputs = []
-  reps = [None] * type_model.tyvars
+  reps = [None] * type_env.tyvars
   for t in L.subterms(opt.src):
     if isinstance(t, (L.Input, L.Instruction)):
-      reps[typing.context[t]] = t
+      reps[type_env.vars[t]] = t
     if isinstance(t, L.Symbol):
       symbols.append(t)
-      ty_symbols[typing.context[t]].append(t)
+      ty_symbols[type_env.vars[t]].append(t)
     elif isinstance(t, L.Input):
       inputs.append(t)
 
   # don't generate width() for fixed or non-integer types
-  for r in xrange(type_model.tyvars):
-    if type_model.constraint[r] != typing.INT:
+  for r in xrange(type_env.tyvars):
+    if type_env.constraint[r] != typing.INT:
       reps[r] = None
 
   reps = [r for r in reps if r is not None]
   assert all(isinstance(t, (L.Input, L.Instruction)) for t in reps)
 
-  goods, bads = make_test_cases(opt, symbols, inputs, type_vectors,
+  goods, bads = make_test_cases(opt, symbols, inputs, type_models,
     random_cases, solver_good, solver_bad, assumptions, strengthen)
 
   log.info('Initial test cases: %s good, %s bad', len(goods), len(bads))
 
   if not goods:
     goods, bads = make_test_cases(opt, symbols, inputs,
-      type_model.type_vectors(), random_cases, solver_good or 10, solver_bad,
+      type_env.models(), random_cases, solver_good or 10, solver_bad,
       assumptions, strengthen)
 
     log.info('Full Examples: %s positive, %s negative', len(goods), len(bads))
@@ -1276,7 +1279,7 @@ def infer_precondition(opt,
     sys.stdout.flush()
   # ----
 
-  config = enumerator.Config(ty_symbols, reps, type_model)
+  config = enumerator.Config(ty_symbols, reps, type_env)
 
   pres = infer_preconditions_by_examples(config, goods, bads,
     features=features, incompletes=incompletes, conflict_set=conflict_set)
