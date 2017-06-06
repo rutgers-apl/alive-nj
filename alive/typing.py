@@ -276,22 +276,80 @@ class TypeConstraints(object):
     self.ordering = ords
     self.width_equalities = eqs
 
+  @staticmethod
+  def find_transitive_bounds(orders):
+    """Return a pair of mappings from a value to values known to be above or
+    below.
+
+    Argument is an iterable of (lo,hi) pairs.
+    """
+
+    above = collections.defaultdict(set)
+    below = collections.defaultdict(set)
+
+    for lo,hi in orders:
+      if lo == hi or lo in above[hi]:
+        problem = above[hi].intersection(below[lo])
+        problem.add(lo)
+        problem.add(hi)
+        problem = sorted(str(_name(v)) for v in problem)
+        raise Error('Incompatible constraints for {}: ' \
+         'circular ordering'.format(', '.join(problem)))
+
+      if lo in below[hi]:
+        continue
+
+      new_above_lo = list(above[hi])
+      new_above_lo.append(hi)
+
+      new_below_hi = list(below[lo])
+      new_below_hi.append(lo)
+
+      for x in new_above_lo:
+        below[x].update(new_below_hi)
+      for x in new_below_hi:
+        above[x].update(new_above_lo)
+
+    return below, above
+
+  @staticmethod
+  def topological_sort(edges, starts):
+    seen = set()
+    order = []
+
+    def visit(n):
+      if n in seen:
+        return
+
+      for d in edges[n]:
+        visit(d)
+
+      seen.add(n)
+      order.append(n)
+
+    for r in starts:
+      visit(r)
+
+    return order
+
   def make_environment(self):
     """Return a TypeEnvironment expressing the constraints gathered
     """
     # TODO: break this into smaller pieces
 
-    self.simplify_orderings()
-    # TODO: this can be folded into the next loop
+    lower_bounds, upper_bounds = self.find_transitive_bounds(
+      (self.rep(lo), self.rep(hi))
+        for (lo,hi) in self.ordering if isinstance(lo, Value))
 
-    # find predecessors and lower bounds
-    lower_bounds = collections.defaultdict(list)
+    # By finding the ordering relations now, we avoid having to maintain them
+    # during unification. Having upper bounds is useful for enumerating
+    # predicates and improves error messages. Making the relations transitive
+    # may increase the cost of enumerating type models, but such cases are rare.
+
     min_width = {}
-    for lo,hi in self.ordering:
+    for (lo,hi) in self.ordering:
       if isinstance(lo, int):
-        min_width[hi] = max(lo, min_width.get(hi,0))
-      else:
-        lower_bounds[hi].append(lo)
+        min_width[self.rep(hi)] = max(lo, min_width.get(hi,0))
 
     if logger.isEnabledFor(logging.DEBUG):
       logger.debug('get_type_model:\n  min_width: ' +
@@ -299,29 +357,7 @@ class TypeConstraints(object):
         '\n  lower_bounds: ' + pretty.pformat(lower_bounds, indent=16))
 
     # recursively walk DAG
-    # TODO: handle all specific constraints first?
-    finished = {}
-    order = []
-    def visit(rep):
-      if rep in finished:
-        if finished[rep]:
-          return
-
-        # if rep is in finished, but we haven't set it to true, then
-        # we must have found a loop
-        raise Error('Incompatible constraints for {}: circular ordering'.format(
-          _name(rep)
-          ))
-
-      finished[rep] = False
-      for p in lower_bounds[rep]:
-        visit(p)
-
-      order.append(rep)
-      finished[rep] = True
-
-    for r in self.sets.reps():
-      visit(r)
+    order = self.topological_sort(lower_bounds, self.sets.reps())
 
     tyvars = dict(itertools.izip(order, itertools.count()))
     if logger.isEnabledFor(logging.DEBUG):
@@ -331,6 +367,8 @@ class TypeConstraints(object):
     min_width = { tyvars[rep]: w for (rep,w) in min_width.iteritems() }
     lower_bounds = { tyvars[rep]: tuple(tyvars[t] for t in ts)
                       for (rep,ts) in lower_bounds.iteritems() if ts }
+    upper_bounds = { tyvars[rep]: tuple(tyvars[t] for t in ts)
+                      for (rep,ts) in upper_bounds.iteritems() if ts }
 
     # recreate specific and constraint in terms of tyvars
     specific = {}
@@ -383,7 +421,7 @@ class TypeConstraints(object):
     #   TypeEnvironment
 
     return TypeEnvironment(context, constraint, specific, min_width, lower_bounds,
-      width_equality, default_id)
+      upper_bounds, width_equality, default_id)
 
 class TypeEnvironment(object):
   """Contains the constraints gathered during type checking.
@@ -396,12 +434,13 @@ class TypeEnvironment(object):
   float_tys = (HalfType(), SingleType(), DoubleType())
 
   def __init__(self, vars, constraint, specific, min_width, lower_bounds,
-      width_equality, default_id):
+      upper_bounds, width_equality, default_id):
     self.vars = vars # node -> tyvar
     self.constraint = constraint
     self.specific = specific
     self.min_width = min_width
     self.lower_bounds = lower_bounds
+    self.upper_bounds = upper_bounds
     self.width_equality = width_equality
     self.default_id = default_id
     self.tyvars = len(constraint)
@@ -588,13 +627,13 @@ class TypeEnvironment(object):
       if isinstance(lo, int):
         if lo > self.min_width.get(v2,0) and \
             all(lo > self.min_width.get(v,0)
-              for v in self.transitive_lower_bounds(v2)) and \
+              for v in self.lower_bounds[v2]) and \
             (v2 not in self.specific or lo > self.bits(self.specific[v2])):
           raise Error("Constraints too strong for " + _name(term))
       else:
         v1 = tc.rep_tyvar[lo]
 
-        if all(v != v1 for v in self.transitive_lower_bounds(v2)):
+        if all(v != v1 for v in self.lower_bounds[v2]):
           raise Error("Constraints too strong for " + _name(term))
 
     # assign tyvars to the new terms
