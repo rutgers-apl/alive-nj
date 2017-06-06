@@ -261,11 +261,23 @@ def funcs(config, ty, size):
     if b: continue
     yield set_type(config, L.AbsCnxp(t), ty), b
 
+  var_ty = ty != config.environment.default_id
+
   for argty in config.symbols.iterkeys():
     for t,b in expressions(config, argty, size-1):
       if b: continue
-      yield set_type(config, L.Log2Cnxp(t), ty), \
-        ty != config.environment.default_id
+      yield set_type(config, L.Log2Cnxp(t), ty), var_ty
+
+  for argty in config.environment.lower_bounds.get(ty, ()):
+    for t,b in expressions(config, argty, size-1):
+      if b: continue
+      yield set_type(config, L.ZExtCnxp(t), ty), var_ty
+      yield set_type(config, L.SExtCnxp(t), ty), var_ty
+
+  for argty in config.environment.upper_bounds.get(ty, ()):
+    for t,b in expressions(config, argty, size-1):
+      if b: continue
+      yield set_type(config, L.TruncCnxp(t), ty), var_ty
 
 
 
