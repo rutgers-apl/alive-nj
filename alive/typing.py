@@ -391,16 +391,23 @@ class TypeConstraints(object):
 
     # note equal widths
     width_equality = {}
-    for (a,b) in self.width_equalities:
-      assert a != b
-      va = tyvars[a]
-      vb = tyvars[b]
-      if va > vb: va,vb = vb,va
+    if self.width_equalities:
+      width_classes = disjoint.DisjointSubsets()
+      for r in xrange(len(order)):
+        width_classes.add_key(r)
 
-      if vb in width_equality:
-        width_equality[va] = width_equality[vb]
+      for (a,b) in self.width_equalities:
+        # TODO: error if a < b or a > b; warn if a == b?
+        width_classes.unify(tyvars[self.rep(a)], tyvars[self.rep(b)])
 
-      width_equality[vb] = va
+      for _,width_class in width_classes.subset_items():
+        if len(width_class) < 2: continue
+
+        it = iter(sorted(width_class))
+        va = next(it)
+        for vb in it:
+          width_equality[vb] = va
+
 
     # set up the default type
     if self.default_rep is None:
@@ -554,28 +561,10 @@ class TypeEnvironment(object):
     """Test whether the type variables are width-equal.
     """
 
-    if v1 > v2:
-      v1,v2 = v2,v1
+    v1 = self.width_equality.get(v1,v1)
+    v2 = self.width_equality.get(v2,v2)
 
-    while v2 in self.width_equality:
-      v2 = self.width_equality[v2]
-      if v1 == v2:
-        return True
-
-    return False
-
-  def transitive_lower_bounds(self, tyvar):
-    seen = {}
-
-    def visit(tyvar):
-      if tyvar in seen: return
-
-      for v in self.lower_bounds.get(tyvar, []):
-        yield v
-        for v2 in visit(v):
-          yield v2
-
-    return visit(tyvar)
+    return v1 == v2
 
   def extend(self, term):
     """Type-check a term with respect to this environment, adding new terms
