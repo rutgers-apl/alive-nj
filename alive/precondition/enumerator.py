@@ -86,43 +86,51 @@ def predicates(config):
       yield p
 
 def sized_predicates(config, size):
-  tys = config.symbols.keys()
-  tys.append(config.environment.default_id)  # shouldn't already be there
+  tys = [(ty,True) for ty in config.symbols.iterkeys()]
+  tys.append((config.environment.default_id, False))  # shouldn't already be there
 
   # comparisons
-  for ty in tys:
+  for ty,forbid_ambiguity in tys:
     zero = set_type(config, L.Literal(0), ty)
 
     # E == 0, E < 0, E > 0
-    for t,b in expressions(config, ty, size-1):
-      if b: continue
-      for cmp in ['eq', 'slt', 'sgt']:
-        yield L.Comparison(cmp, t, zero)
+    for t,b in expressions(config, ty, size):
+      if b and forbid_ambiguity: continue
+
+      if isinstance(t, L.AddCnxp):
+        yield L.Comparison('eq', t.x, set_type(config, L.NegCnxp(t.y), ty))
+      elif isinstance(t, L.SubCnxp):
+        yield L.Comparison('eq', t.x, t.y)
+      else:
+        yield L.Comparison('eq', t, zero)
+
+      yield L.Comparison('slt', t, zero)
+      yield L.Comparison('sgt', t, zero)
 
     # E1 < E2, E1 u< E2
     for rsize in xrange(1, (size+1)/2):
       for l,bl in expressions(config, ty, size-rsize):
         for r,br in expressions(config, ty, rsize, one=True):
-          if bl and br: continue
-          yield L.Comparison('slt', l, r)
-          yield L.Comparison('sgt', l, r)
+          if bl and br and forbid_ambiguity: continue
           yield L.Comparison('ult', l, r)
           yield L.Comparison('ugt', l, r)
+          yield L.Comparison('slt', l, r)
+          yield L.Comparison('sgt', l, r)
 
     if size % 2 == 0:
       for n,(l,bl) in enumerate(expressions(config, ty, size/2, one=True)):
         for r,br in itertools.islice(expressions(config,ty,size/2,one=True), n):
-          if bl and br: continue
-          yield L.Comparison('slt', l, r)
-          yield L.Comparison('sgt', l, r)
+          if bl and br and forbid_ambiguity: continue
           yield L.Comparison('ult', l, r)
           yield L.Comparison('ugt', l, r)
+          yield L.Comparison('slt', l, r)
+          yield L.Comparison('sgt', l, r)
 
 
   # unary predicate functions
-  for ty in tys:
+  for ty,forbid_ambiguity in tys:
     for t,b in expressions(config, ty, size-1):
-      if b: continue
+      if b and forbid_ambiguity: continue
       yield L.IntMinPred(t)
       yield L.Power2Pred(t)
       yield L.Power2OrZPred(t)
@@ -152,8 +160,7 @@ def atoms(config, ty, size):
     yield (s, False)
 
   for r in config.type_reps:
-    yield set_type(config, L.WidthCnxp(r), ty), \
-      ty != config.environment.default_id
+    yield set_type(config, L.WidthCnxp(r), ty), True
 
 def sums(config, ty, size):
   def combine(x, (y,by), neg):
@@ -258,26 +265,23 @@ def funcs(config, ty, size):
   if size < 2: return
 
   for t,b in expressions(config, ty, size-1):
-    if b: continue
     yield set_type(config, L.AbsCnxp(t), ty), b
-
-  var_ty = ty != config.environment.default_id
 
   for argty in config.symbols.iterkeys():
     for t,b in expressions(config, argty, size-1):
       if b: continue
-      yield set_type(config, L.Log2Cnxp(t), ty), var_ty
+      yield set_type(config, L.Log2Cnxp(t), ty), True
 
   for argty in config.environment.lower_bounds.get(ty, ()):
     for t,b in expressions(config, argty, size-1):
       if b: continue
-      yield set_type(config, L.ZExtCnxp(t), ty), var_ty
-      yield set_type(config, L.SExtCnxp(t), ty), var_ty
+      yield set_type(config, L.ZExtCnxp(t), ty), True
+      yield set_type(config, L.SExtCnxp(t), ty), True
 
   for argty in config.environment.upper_bounds.get(ty, ()):
     for t,b in expressions(config, argty, size-1):
       if b: continue
-      yield set_type(config, L.TruncCnxp(t), ty), var_ty
+      yield set_type(config, L.TruncCnxp(t), ty), True
 
 
 
