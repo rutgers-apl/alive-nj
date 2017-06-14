@@ -1,5 +1,5 @@
 #!/usr/bin/env python
 
-from alive.precondition.inference import main
+from alive.tools.infer import main
 
 main()

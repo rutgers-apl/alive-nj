@@ -5,13 +5,13 @@ import os
 import os.path
 import itertools
 import z3
-from . import config
-from . import error
-from . import typing
-from . import refinement
-from . import smtinterp
-from .util.args import NegatableFlag
-from .parser import read_opt_files
+from .. import config
+from .. import error
+from .. import typing
+from .. import refinement
+from .. import smtinterp
+from ..util.args import NegatableFlag
+from .common import read_opt_files, all_of, match_name
 
 class StatusReporter(object):
   _fmt         = '{0.tested} Tested. Done {0.checks:2} for {0.opt.name!r}'
@@ -182,6 +182,8 @@ def main(
     choices=rounding_modes,
     default=default_rounding_mode,
     help='rounding mode for arithmetic')
+  parser.add_argument('-m', '--match', metavar='PATTERN',
+    help='select optimizations with names matching this regular expression')
   parser.add_argument('--bench-dir', action='store',
     default=default_bench_dir,
     help='generate SMT2 benchmarks in this directory')
@@ -214,10 +216,10 @@ def main(
     z3.set_default_rounding_mode(rounding_modes[args.rounding_mode]())
 
   try:
-    opts = read_opt_files(args.file)
-
-    if filter:
-      opts = itertools.ifilter(filter, opts)
+    opts = read_opt_files(
+      files  = args.file,
+      filter = all_of(match_name(args.match), filter),
+    )
 
     verify_opts(opts,
       quiet    = args.quiet,
