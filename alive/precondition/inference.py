@@ -720,7 +720,14 @@ def infer_preconditions_by_examples(config, positive, negative,
           generated_preconditions.add(key)
           p = make_precondition(clauses, features)
           cv = calculate_coverage(clauses, feature_vectors)
-          assert cv == len(positive)
+          cv = 0
+          if cv != len(positive):
+            log.error("Full precondition does not accept all positives"
+              "(%s != %s)\n%s\n%s\n--\n%s", cv, len(positive),
+              Formatted(p),
+              pformat(clauses),
+              pformat(feature_vectors))
+            raise Failure('Incomplete coverage. Please send us the log.')
 
           yield p, cv, features
 

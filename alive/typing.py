@@ -659,6 +659,9 @@ class TypeModel(object):
   def __hash__(self):
     return hash(type(self)) ^ hash((self.environment, self.types))
 
+  def __repr__(self):
+    return "TypeModel({0.environment},{0.types})".format(self)
+
 class _EnvironmentExtender(TypeConstraints):
   """Used by TypeEnvironment.extend.
   """
