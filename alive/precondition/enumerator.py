@@ -51,7 +51,7 @@ def negate_pred(pred):
   return L.NotPred(pred)
 
 def preconditions(config):
-  for size in itertools.count(2):
+  for size in itertools.count(1):
     logger.info('Generating size %s', size)
     for p in sized_preconditions(config, size):
       yield p
@@ -80,7 +80,7 @@ def sized_preconditions(config, size):
 
 
 def predicates(config):
-  for size in itertools.count(2):
+  for size in itertools.count(1):
     logger.info('Generating size %s', size)
     for p in sized_predicates(config, size):
       yield p
