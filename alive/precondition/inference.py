@@ -659,6 +659,7 @@ def infer_preconditions_by_examples(config, positive, negative,
   conflict_set - a strategy for selecting conflict sets
   """
   log = logger.getChild('pie')
+  logex = logger.getChild('examples')
 
   log.info('Inferring: examples %s/%s, features %s', len(positive),
     len(negative), len(features))
@@ -757,9 +758,11 @@ def infer_preconditions_by_examples(config, positive, negative,
       reporter.accept_feature()
       log.info('Feature %s: %s', len(features), f)
       if log.isEnabledFor(logging.DEBUG):
-        log.debug('Feature Vectors\n  ' +
-          pformat([(v,len(g),len(b)) for (v,g,b) in feature_vectors],
-            indent=2))
+        log.debug(pformat('Feature Vectors',
+          [(v,len(g),len(b)) for (v,g,b) in feature_vectors],
+          indent=2))
+      if logex.isEnabledFor(logging.DEBUG):
+        logex.debug(pformat('Feature Vectors', feature_vectors, indent=2))
 
     except MoreExamples:
       log.debug('Caught MoreExamples')
@@ -988,7 +991,11 @@ def make_test_cases(opt, symbols, inputs, type_models,
 
       reporter.test_cases(goods, bads)
 
-
+  logex = logger.getChild('examples')
+  if logex.isEnabledFor(logging.DEBUG):
+    logex.debug('Initial examples\nPositive:\n  %s\nNegative:\n  %s',
+      pformat(goods, indent=2, start_at=2),
+      pformat(bads, indent=2, start_at=2))
   return goods, bads
 
 def exponential_sample(iterable):
