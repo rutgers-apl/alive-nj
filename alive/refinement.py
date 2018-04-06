@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 
 PRESAFE, TGTSAFE, UB, POISON, UNEQUAL = range(5)
 
-def check(opt, type_model, encoding=config.encoding):
+def check(opt, type_model, encoding=config.encoding, assume_inhabited=False):
+  """Check that opt is a refinement for the given type_model.
+  Raises Error if the opt is not a refinement. Returns false if opt
+  is trivial (that is, the precondition cannot be satisfied. Otherwise,
+  returns true.
+
+  Keywords:
+  encoding: specify an encoding using a string or SMTEncoder class
+  assume_inhabited: if true, do not check whether the precondition is satisfied.
+  """
   logger.info('Checking refinement of %r', opt.name)
 
   encoding = smtinterp.lookup(encoding)
@@ -32,7 +41,6 @@ def check(opt, type_model, encoding=config.encoding):
   if pre.defined or pre.nonpoison:
     raise Exception('Defined/Non-poison condition declared by precondition')
 
-
   src = smt(opt.src)
   if src.aux:
     raise Exception('Auxiliary condition declared by source')
@@ -40,17 +48,22 @@ def check(opt, type_model, encoding=config.encoding):
   tgt = smt(opt.tgt)
   premise += tgt.aux
 
-  def err(c, m):
-    return CounterExampleError(
-      c, m, type_model, opt.src, src.value, tgt.value, encoding)
+  def check_expr(stage, expr):
+    m = satisfiable(expr, opt.name, _stage_name[stage])
+    if m is not None:
+      raise CounterExampleError(stage, m, type_model, opt.src, src.value,
+              tgt.value, encoding)
 
   if pre.safe:
-    check_expr(PRESAFE, mk_and(premise + [mk_not(pre.safe)]), opt, err)
+    check_expr(PRESAFE, mk_and(premise + [mk_not(pre.safe)]))
 
   premise += pre.value
 
+  inhabited = assume_inhabited or \
+    satisfiable(mk_and(premise), opt.name, 'inhabited') is not None
+
   if tgt.safe:
-    check_expr(TGTSAFE, mk_and(premise + [mk_not(tgt.safe)]), opt, err)
+    check_expr(TGTSAFE, mk_and(premise + [mk_not(tgt.safe)]))
 
   premise += src.defined
   if config.poison_undef:
@@ -58,17 +71,19 @@ def check(opt, type_model, encoding=config.encoding):
 
   if tgt.defined:
     expr = premise + [mk_not(tgt.defined)]
-    check_expr(UB, mk_forall(src.qvars, expr), opt, err)
+    check_expr(UB, mk_forall(src.qvars, expr))
 
   if not config.poison_undef:
     premise += src.nonpoison
 
   if tgt.nonpoison:
-    check_expr(POISON,
-      mk_forall(src.qvars, premise + [mk_not(tgt.nonpoison)]), opt, err)
+    check_expr(POISON, mk_forall(src.qvars, premise + [mk_not(tgt.nonpoison)]))
 
   check_expr(UNEQUAL,
-    mk_forall(src.qvars, premise + [z3.Not(src.value == tgt.value)]), opt, err)
+    mk_forall(src.qvars, premise + [z3.Not(src.value == tgt.value)]))
+
+  return inhabited
+
 
 _stage_name = {
   PRESAFE: 'precondition safety',
@@ -85,44 +100,49 @@ header = '''(set-info :source |
 |)
 '''
 
-def check_expr(stage, expr, opt, err):
+
+def satisfiable(expr, opt_name='<unknown opt>', stage='<unknown>'):
+  """Return a model satisfying the SMT expression, if any. Return None if
+  the expression is unsatisfiable. Raise Error if the solver cannot determine
+  satisfiability.
+  """
   s = z3.Solver()
   if config.timeout is not None:
     s.set('timeout', config.timeout)
   s.add(expr)
-  logger.info('%s check\n%s', _stage_name[stage], s)
+  logger.debug('%s check for %s\n%s', stage, opt_name, s)
 
-  time0 = time.time()
+  time_start = time.time()
   res = s.check()
-  time1 = time.time()
+  time_end = time.time()
 
-  solve_time = time1 - time0
+  solve_time = time_end - time_start
 
-  if logger.isEnabledFor(logging.INFO):
-    logger.info('\nresult: %s\ntime: %s\nstats:\n%s', res, solve_time,
+  if logger.isEnabledFor(logging.DEBUG):
+    logger.debug('\nresult: %s\ntime: %s\nstats\n%s', res, solve_time,
       s.statistics())
 
   if config.bench_dir and solve_time >= config.bench_threshold:
     files = glob.glob(config.bench_dir + '/*.smt2')
     filename = '{0}/{1:03d}.smt2'.format(config.bench_dir, len(files))
+    logger.debug('Writing benchmark file %r', filename)
     fd = open(filename, 'w')
     fd.write(header)
-    fd.write('; {0} check for {1!r}\n'.format(_stage_name[stage], opt.name))
+    fd.write('; {0} check for {1!r}\n'.format(stage, opt_name))
     fd.write('; time: {0} s\n\n'.format(solve_time))
     fd.write(s.to_smt2())
     fd.close()
 
   if res == z3.sat:
     m = s.model()
-    logger.info('counterexample: %s', m)
+    logger.debug('counterexample: %s', m)
 
-    raise err(stage, m)
+    return m
 
   if res == z3.unknown:
     raise Error('Model returned unknown: ' + s.reason_unknown())
 
   return None
-
 
 
 def format_z3val(val):

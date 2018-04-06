@@ -55,16 +55,27 @@ class StatusReporter(object):
     self.checks += 1
     self.write_status()
 
-  def end_opt(self):
+  def end_opt(self, inhabited):
     if self.checks == 0:
       raise typing.Error('Unsatisfiable type constraints')
 
     logging.info('Passed %s checks', self.checks)
     self.tested += 1
-    if not self.quiet:
+    if self.quiet and not inhabited:
+      self.clear()
+      print '----------'
+      self.opt.format().write_to(sys.stdout, width=self.width)
+      print
+
+    if not self.quiet or not inhabited:
       self.clear()
       print 'Done:', self.checks
       print 'Optimization is correct'
+
+    if not inhabited:
+      print 'WARNING: Precondition is unsatisfiable'
+      sys.stdout.flush()
+      print
 
   def fail_opt(self, error):
     logging.info('Verification failed: %s', error)
@@ -144,11 +155,12 @@ def verify_opts(opts,
     try:
       status_reporter.begin_opt(opt)
 
+      inhabited = False
       for m in opt.type_models():
-        refinement.check(opt, m, encoding)
+        inhabited = refinement.check(opt, m, encoding, inhabited)
         status_reporter.add_proof()
 
-      status_reporter.end_opt()
+      status_reporter.end_opt(inhabited)
 
     except (refinement.Error, typing.Error) as e:
       status_reporter.fail_opt(e)
