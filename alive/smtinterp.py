@@ -55,7 +55,7 @@ class MetaEncoder(type):
       if cls.__module__ != __name__ and cls.__module__ != '__main__':
         reg_name = cls.__module__ + '.' + name
 
-      reg_name = reg_name.lower()
+      reg_name = reg_name.lower().replace('_', '-')
 
       if reg_name in cls.registry:
         raise ValueError('Duplicate encoder key: {0}\n{1}\n{2}'.format(
