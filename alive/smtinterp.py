@@ -1393,9 +1393,9 @@ class NewShlMixin(BaseSMTEncoder):
 eval.register(ShlInst, NewShlMixin,
   shift_op(operator.lshift,
     poisons = {
-    'nsw': lambda a,b: z3.Or((a << b) >> b == a,
+    'nsw': lambda a,b,c: z3.Or(c >> b == a,
                              z3.And(a == 1, b == b.size() - 1)),
-    'nuw': lambda a,b: z3.LShR(a << b, b) == a}))
+    'nuw': lambda a,b,c: z3.LShR(c, b) == a}))
 
 
 class SMTPoisonNewShl(NewShlMixin, SMTPoison):
