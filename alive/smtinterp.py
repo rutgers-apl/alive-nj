@@ -265,12 +265,15 @@ class BaseSMTEncoder():
       '{} does not support floating-point conversion'.format(
       type(self).__name__.lower()))
 
-  def _binary_operator(self, term, op, defined, poisons):
+  def _binary_operator(self, term, op, defined, nonpoison, poisons):
     x = self.eval(term.x)
     y = self.eval(term.y)
 
     if defined:
       self.add_defs(*defined(x,y))
+
+    if nonpoison:
+      self.add_nonpoison(*nonpoison(x,y))
 
     if poisons:
       for f in poisons:
@@ -440,8 +443,9 @@ def _(term, smt):
 
 # TODO: since none of the clients use defined (aside from PLDI2015), maybe
 # better to move it out
-def binop(op, defined=None, poisons=None):
-  return lambda term, smt: smt._binary_operator(term, op, defined, poisons)
+def binop(op, defined=None, nonpoison=None, poisons=None):
+  return lambda term, smt: smt._binary_operator(
+    term, op, defined, nonpoison, poisons)
 
 eval.register(AddInst, BaseSMTEncoder,
   binop(operator.add,
@@ -524,39 +528,25 @@ def _(term, smt):
 
   return z3.URem(x,y)
 
-def shift_op(op, poisons):
-  def _(term, smt):
-    x = smt.eval(term.x)
-    y = smt.eval(term.y)
-    z = smt._conditional_value([z3.ULT(y, y.size())], op(x,y), term.name)
-
-    for f in poisons:
-      if smt.has_analysis(f, term):
-        smt.add_nonpoison(
-          z3.Implies(smt.get_analysis(f, term), poisons[f](x,y,z)))
-      elif f in term.flags:
-        smt.add_nonpoison(poisons[f](x,y,z))
-
-    cond = [z3.ULT(y, y.size())]
-    return z
-
-  return _
 
 eval.register(ShlInst, BaseSMTEncoder,
-  shift_op(operator.lshift,
+  binop(operator.lshift,
+    nonpoison = lambda x,y: [z3.ULT(y, y.size())],
     poisons = {
-      'nsw': lambda x,y,z: z >> y == x,
-      'nuw': lambda x,y,z: z3.LShR(z, y) == x}))
+      'nsw': lambda x,y: (x << y) >> y == x,
+      'nuw': lambda x,y: z3.LShR(x << y, y) == x}))
 
 
 eval.register(AShrInst, BaseSMTEncoder,
-  shift_op(operator.rshift,
-    poisons = {'exact': lambda x,y,z: z << y == x}))
+  binop(operator.rshift,
+    nonpoison = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: (x >> y) << y == x}))
 
 
 eval.register(LShrInst, BaseSMTEncoder,
-  shift_op(z3.LShR,
-    poisons = {'exact': lambda x,y,z: z << y == x}))
+  binop(z3.LShR,
+    nonpoison = lambda x,y: [z3.ULT(y, y.size())],
+    poisons = {'exact': lambda x,y: z3.LShR(x,y) << y == x}))
 
 
 eval.register(AndInst, BaseSMTEncoder, binop(operator.and_))
@@ -1382,12 +1372,55 @@ eval.register(LShrInst, PLDI2015,
     poisons = {'exact': lambda x,y: z3.LShR(x, y) << y == x}))
 
 
+class LLVM4Mixin(BaseSMTEncoder):
+  """Prior to LLVM 5.0, shifts returned undefined values when the shift amount
+  exceeded the bit-width.
+  """
+
+def shift_op(op, poisons):
+  def _(term, smt):
+    x = smt.eval(term.x)
+    y = smt.eval(term.y)
+    z = smt._conditional_value([z3.ULT(y, y.size())], op(x,y), term.name)
+
+    for f in poisons:
+      if smt.has_analysis(f, term):
+        smt.add_nonpoison(
+          z3.Implies(smt.get_analysis(f, term), poisons[f](x,y,z)))
+      elif f in term.flags:
+        smt.add_nonpoison(poisons[f](x,y,z))
+
+    return z
+
+  return _
+
+eval.register(ShlInst, LLVM4Mixin,
+  shift_op(operator.lshift,
+    poisons = {
+      'nsw': lambda x,y,z: z >> y == x,
+      'nuw': lambda x,y,z: z3.LShR(z, y) == x}))
+
+
+eval.register(AShrInst, LLVM4Mixin,
+  shift_op(operator.rshift,
+    poisons = {'exact': lambda x,y,z: z << y == x}))
+
+
+eval.register(LShrInst, LLVM4Mixin,
+  shift_op(z3.LShR,
+    poisons = {'exact': lambda x,y,z: z << y == x}))
+
+class SMTUndef_LLVM4(LLVM4Mixin, SMTUndef):
+  pass
+
+class SMTPoison_LLVM4(LLVM4Mixin, SMTPoison):
+  pass
 
 # -----
 # Miscellaneous encoders
 
 
-class NewShlMixin(BaseSMTEncoder):
+class NewShlMixin(LLVM4Mixin):
   pass
 
 eval.register(ShlInst, NewShlMixin,

@@ -1,4 +1,4 @@
-; ERROR: Target introduces undefined behavior
+; ERROR: Target introduces poison
 %a = add %b, %b
   =>
 %a = shl %b, 1

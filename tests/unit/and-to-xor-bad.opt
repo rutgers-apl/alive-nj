@@ -1,0 +1,10 @@
+; ERROR: Target introduces poison
+; TEST-ARGS: --encoding smtundef-llvm4
+
+Name: add -> xor, no nsw, no nuw
+  %old0 = shl i32 1, %nbits
+  %ret  = add i32 %old0, -1
+=>
+  %new0 = shl nsw i32 -1, %nbits
+  %ret  = xor i32 %new0, -1
+
