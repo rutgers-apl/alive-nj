@@ -209,7 +209,7 @@ def main(
   args = parser.parse_args()
 
   if args.list_encodings:
-    for name,cls in smtinterp.encoders():
+    for name,cls in sorted(smtinterp.encoders()):
       print name
     exit(0)
 
